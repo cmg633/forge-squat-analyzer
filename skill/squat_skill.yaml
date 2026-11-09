@@ -1,0 +1,448 @@
+# ============================================================
+# SQUAT SKILL FILE  –  Forge AI Squat Analyser
+# Source: "Starting Strength" reference chapter, pages 1-35
+# All criteria are derived ONLY from the reference material.
+# "implementation_assumption" fields note where the PDF uses
+# approximate language ("about 45°") and a numeric tolerance
+# has been added by the engineer; this label appears in the UI.
+# ============================================================
+
+meta:
+  version: "1.0.0"
+  skill_name: "Barbell Back Squat"
+  source_document: "Reference Chapter, pages 1-35"
+  last_updated: "2026-11-09"
+  hot_reload: true          # Backend reloads this file without restart
+
+# ------------------------------------------------------------------
+# CRITERIA
+# ------------------------------------------------------------------
+criteria:
+
+  # ----------------------------------------------------------------
+  # 1. SQUAT DEPTH
+  # ----------------------------------------------------------------
+  - id: "DEPTH_HIP_CREASE"
+    title: "Hip Crease Below Top of Patella"
+    source_page: 7
+    source_section: "Fig 2-1"
+    verbatim_quote: >
+      "A correct squat goes below parallel—the crease of the hip must
+       descend below the top of the patella."
+    measurement_method: >
+      At the bottom frame of each rep, compare the y-coordinate of the
+      hip landmark (MediaPipe landmark 23/24 average) with the y-coordinate
+      of the knee landmark (MediaPipe landmark 25/26 average, used as a
+      proxy for the top of the patella). Lower y-pixel value = higher in
+      frame. Hip crease below patella means hip y-pixel > knee y-pixel
+      (further down in image coordinates).
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Hip crease vs patella height is clearly visible in a true sagittal
+      (side) view. Landmark visibility is required for both hip and knee.
+    required_landmarks:
+      - LEFT_HIP      # 23
+      - RIGHT_HIP     # 24
+      - LEFT_KNEE     # 25
+      - RIGHT_KNEE    # 26
+    result_logic: >
+      At the bottom frame:
+        hip_y_avg = mean(hip_23.y, hip_24.y)   [image pixel y]
+        knee_y_avg = mean(knee_25.y, knee_26.y)
+        depth_px_delta = hip_y_avg - knee_y_avg
+        meets = (depth_px_delta > DEPTH_THRESHOLD_PX)
+      where DEPTH_THRESHOLD_PX accounts for the fact that in a side view
+      the near-side hip/knee are used; if only one side is visible (> 0.6
+      visibility) use that side alone.
+    thresholds:
+      DEPTH_THRESHOLD_PX:
+        value: 0
+        unit: "pixels (hip y must exceed knee y in image coords)"
+        source: "Fig 2-1 — hip crease below top of patella"
+        implementation_assumption: >
+          A threshold of 0 px means exactly parallel. The reference says
+          "below parallel" so strict positivity is required. A tolerance
+          of +/- 5 px is applied for landmark jitter (implementation
+          assumption, not stated in PDF).
+    tags: ["depth", "primary"]
+
+  # ----------------------------------------------------------------
+  # 2. BACK / TORSO ANGLE
+  # ----------------------------------------------------------------
+  - id: "BACK_ANGLE_BOTTOM"
+    title: "Back Angle at Bottom (~45° from Horizontal)"
+    source_page: 13
+    source_section: "Fig 2-13, Fig 2-5"
+    verbatim_quote: >
+      "At the bottom of the squat the back will be at an angle of about
+       45 degrees from the horizontal."
+    measurement_method: >
+      At the bottom frame, compute the angle of the spine vector
+      (shoulder midpoint → hip midpoint) with respect to the horizontal.
+      shoulder_mid = mean(landmark_11, landmark_12)   [LEFT/RIGHT_SHOULDER]
+      hip_mid      = mean(landmark_23, landmark_24)   [LEFT/RIGHT_HIP]
+      torso_angle_deg = degrees(arctan2(
+          abs(hip_mid.y - shoulder_mid.y),
+            abs(hip_mid.x - shoulder_mid.x)  ))
+      A fully vertical torso = 90°; a 45° lean from horizontal = 45°.
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Torso angle is well-defined in a true sagittal (side) view.
+      Requires shoulders and hips to both be visible (> 0.5 visibility).
+    required_landmarks:
+      - LEFT_SHOULDER   # 11
+      - RIGHT_SHOULDER  # 12
+      - LEFT_HIP        # 23
+      - RIGHT_HIP       # 24
+    result_logic: >
+      meets = (BACK_ANGLE_MIN <= torso_angle_deg <= BACK_ANGLE_MAX)
+    thresholds:
+      BACK_ANGLE_MIN:
+        value: 35
+        unit: "degrees from horizontal"
+        source: "Fig 2-13 — 'about 45 degrees'"
+        implementation_assumption: >
+          PDF says 'about 45 degrees'. Engineer applies ±10° tolerance
+          (35°–55°) as a reasonable range; this is an IMPLEMENTATION
+          ASSUMPTION not stated in the PDF.
+      BACK_ANGLE_MAX:
+        value: 55
+        unit: "degrees from horizontal"
+        source: "Fig 2-13 — 'about 45 degrees'"
+        implementation_assumption: >
+          Same as BACK_ANGLE_MIN note — ±10° tolerance is assumed.
+    tags: ["back_angle", "primary"]
+
+  # ----------------------------------------------------------------
+  # 3. BAR OVER MIDFOOT
+  # ----------------------------------------------------------------
+  - id: "BAR_OVER_MIDFOOT"
+    title: "Bar Remains Over Midfoot Through Full ROM"
+    source_page: 10
+    source_section: "Fig 2-7, Fig 2-8"
+    verbatim_quote: >
+      "The bar must stay over the mid-foot—the balance point of the
+       foot—throughout the entire range of motion."
+    measurement_method: >
+      Midfoot x-coordinate estimated as midpoint between heel (landmark 29/30)
+      and toe (landmark 31/32) landmarks. Bar x-coordinate from CSRT tracker
+      or user-tapped bar point. Compute horizontal offset each frame:
+        offset_px = bar_x - midfoot_x
+      Track max absolute deviation over the rep.
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Bar-over-midfoot is a horizontal alignment check, well-visible in
+      a sagittal view. Requires foot and bar to both be tracked.
+    required_landmarks:
+      - LEFT_HEEL   # 29
+      - RIGHT_HEEL  # 30
+      - LEFT_FOOT_INDEX  # 31
+      - RIGHT_FOOT_INDEX # 32
+    result_logic: >
+      max_offset = max(abs(bar_x[f] - midfoot_x[f]) for f in rep_frames)
+      meets = (max_offset <= BAR_MIDFOOT_TOLERANCE_PX)
+      If bar tracker is lost: cannot_assess.
+    thresholds:
+      BAR_MIDFOOT_TOLERANCE_PX:
+        value: 40
+        unit: "pixels (at 1080p reference resolution)"
+        source: "Fig 2-7/2-8 — bar over midfoot"
+        implementation_assumption: >
+          The PDF describes bar-over-midfoot as a qualitative requirement.
+          A 40px tolerance at 1080p (≈2–3 cm at typical camera distance)
+          is an IMPLEMENTATION ASSUMPTION. Scaled proportionally for other
+          resolutions.
+    tags: ["bar_path", "primary"]
+
+  # ----------------------------------------------------------------
+  # 4. HIP DRIVE (HIPS RISE FIRST)
+  # ----------------------------------------------------------------
+  - id: "HIP_DRIVE"
+    title: "Hip Drive — Hips Rise Before Shoulders"
+    source_page: 18
+    source_section: "Chapter text, 'up not forward'"
+    verbatim_quote: >
+      "Drive the hips up. Not forward, not back—up."
+    measurement_method: >
+      In the ascending phase of each rep (frames from bottom to lockout):
+      Compare the rate-of-change of hip_y vs shoulder_y.
+        hip_rise_rate    = d(hip_y)/dt   [pixels per frame going up]
+        shoulder_rise_rate = d(shoulder_y)/dt
+      "Hips rise first" means hip_rise_rate > shoulder_rise_rate in the
+      early ascending phase (first 30% of ascent frames).
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Hip vs shoulder vertical velocity is visible in a sagittal view.
+    required_landmarks:
+      - LEFT_HIP
+      - RIGHT_HIP
+      - LEFT_SHOULDER
+      - RIGHT_SHOULDER
+    result_logic: >
+      early_frames = ascent_frames[:int(0.3 * len(ascent_frames))]
+      hip_leads = mean(hip_rise_rate[early_frames]) > mean(shoulder_rise_rate[early_frames])
+      meets = hip_leads
+      cannot_assess if fewer than 5 ascent frames detected.
+    thresholds: {}
+    tags: ["hip_drive", "primary"]
+
+  # ----------------------------------------------------------------
+  # 5. EYE GAZE / HEAD POSITION
+  # ----------------------------------------------------------------
+  - id: "EYE_GAZE"
+    title: "Eyes Down — Gaze 4-5 ft Ahead on Floor"
+    source_page: 20
+    source_section: "Chapter text"
+    verbatim_quote: >
+      "Your eyes should be cast down at a spot on the floor about 4-5
+       feet in front of you."
+    measurement_method: >
+      Compute the angle of the nose-to-ear vector with respect to the
+      horizontal. A neutral/downward gaze produces a slight downward
+      head tilt; looking up produces a nose-above-ear relationship.
+        nose = landmark_0; left_ear = landmark_7; right_ear = landmark_8
+      head_angle_deg = degrees of (nose - ear_mid) from horizontal
+      Downward gaze → head_angle < 0 or slightly positive (0–15°).
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Head tilt / gaze direction is assessable in a sagittal view as a
+      proxy; exact gaze angle is an estimate. Marked as estimated.
+    required_landmarks:
+      - NOSE         # 0
+      - LEFT_EAR     # 7
+      - RIGHT_EAR    # 8
+    result_logic: >
+      head_angle_deg = atan2(nose.y - ear_mid.y, nose.x - ear_mid.x) * 180/pi
+      meets = (GAZE_MIN <= head_angle_deg <= GAZE_MAX)
+    thresholds:
+      GAZE_MIN:
+        value: -20
+        unit: "degrees (negative = nose below ears)"
+        source: "Chapter text — 'eyes down 4-5 ft ahead'"
+        implementation_assumption: >
+          The PDF describes gaze direction qualitatively. Nose-below-ears
+          at 0–20° below horizontal is treated as 'eyes down'. This range
+          is an IMPLEMENTATION ASSUMPTION. Confidence is LOW for this metric.
+      GAZE_MAX:
+        value: 10
+        unit: "degrees (positive = nose slightly above horizontal from ear)"
+        source: "Chapter text — 'eyes down 4-5 ft ahead'"
+        implementation_assumption: >
+          Same as GAZE_MIN note.
+    tags: ["gaze", "secondary"]
+
+  # ----------------------------------------------------------------
+  # 6. BAR POSITION ON BACK  (cannot assess from side view alone)
+  # ----------------------------------------------------------------
+  - id: "BAR_POSITION_BACK"
+    title: "Bar Position — Just Below Scapular Spine"
+    source_page: 24
+    source_section: "Fig 2-19"
+    verbatim_quote: >
+      "The bar should rest just below the spine of the scapula, in the
+       meat of the upper back muscles."
+    measurement_method: >
+      Would require a rear or combined view to confirm bar resting position
+      relative to scapular spine. In a side view only gross height relative
+      to shoulder can be inferred, not medial/lateral placement.
+    side_view_assessable: false
+    side_view_assessable_reason: >
+      Bar-on-back position (medial-lateral and depth relative to scapular
+      spine) cannot be confirmed from a pure sagittal camera angle.
+      A rear view or combined view is required (Fig 2-19).
+    required_landmarks: []
+    result_logic: "cannot_assess"
+    thresholds: {}
+    tags: ["bar_position", "cannot_assess"]
+
+  # ----------------------------------------------------------------
+  # 7. STANCE WIDTH  (cannot assess from side view)
+  # ----------------------------------------------------------------
+  - id: "STANCE_WIDTH"
+    title: "Heels Shoulder-Width Apart"
+    source_page: 6
+    source_section: "Chapter text"
+    verbatim_quote: >
+      "The heels should be about shoulder-width apart."
+    measurement_method: >
+      Requires a front or top view to measure heel-to-heel distance
+      relative to shoulder width. Side view collapses depth, making
+      stance width assessment impossible.
+    side_view_assessable: false
+    side_view_assessable_reason: >
+      In a side-view (sagittal) camera, both feet overlap in the image plane.
+      Stance width cannot be measured from this angle.
+    required_landmarks: []
+    result_logic: "cannot_assess"
+    thresholds: {}
+    tags: ["stance", "cannot_assess"]
+
+  # ----------------------------------------------------------------
+  # 8. TOE ANGLE (cannot assess from side view)
+  # ----------------------------------------------------------------
+  - id: "TOE_ANGLE"
+    title: "Toes Turned Out ~30 Degrees"
+    source_page: 6
+    source_section: "Chapter text"
+    verbatim_quote: >
+      "The toes should be turned out at approximately 30 degrees."
+    measurement_method: >
+      Toe-out angle requires a top-down or front view to measure the
+      angle between foot long-axis and the sagittal plane.
+    side_view_assessable: false
+    side_view_assessable_reason: >
+      Toe angle is not visible in a pure side view — the foot axis is
+      parallel to the camera direction, making angle measurement impossible.
+    required_landmarks: []
+    result_logic: "cannot_assess"
+    thresholds: {}
+    tags: ["stance", "cannot_assess"]
+
+  # ----------------------------------------------------------------
+  # 9. KNEES TRACKING OVER FEET (partially assessable)
+  # ----------------------------------------------------------------
+  - id: "KNEE_TRACKING"
+    title: "Knees Track Over Feet (Out, Not Caving)"
+    source_page: 8
+    source_section: "Chapter text"
+    verbatim_quote: >
+      "The knees should track in the same direction as the toes, out
+       over the feet, and must not cave inward."
+    measurement_method: >
+      In a side view, medial/lateral knee travel (valgus/varus collapse)
+      is not visible. Only gross knee-over-foot horizontal alignment can
+      be estimated. Full assessment requires a front view.
+    side_view_assessable: false
+    side_view_assessable_reason: >
+      Knee caving (valgus) is a medial motion that is invisible from a
+      pure sagittal camera angle. The side view cannot distinguish knees
+      tracking out from knees caving in.
+    required_landmarks: []
+    result_logic: "cannot_assess"
+    thresholds: {}
+    tags: ["knee_tracking", "cannot_assess"]
+
+  # ----------------------------------------------------------------
+  # 10. KNEE ANGLE AT BOTTOM
+  # ----------------------------------------------------------------
+  - id: "KNEE_ANGLE_BOTTOM"
+    title: "Knee Flexion Angle at Bottom"
+    source_page: 7
+    source_section: "Fig 2-1"
+    verbatim_quote: >
+      "At the bottom of the squat the knees are maximally flexed."
+    measurement_method: >
+      At the bottom frame, compute the angle at the knee joint:
+        angle = angle_between(hip-knee vector, knee-ankle vector)
+        using landmarks: HIP(23/24), KNEE(25/26), ANKLE(27/28)
+      Reported as knee flexion angle in degrees (180° = fully extended).
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Knee flexion angle is clearly visible in a sagittal view.
+    required_landmarks:
+      - LEFT_HIP
+      - RIGHT_HIP
+      - LEFT_KNEE
+      - RIGHT_KNEE
+      - LEFT_ANKLE
+      - RIGHT_ANKLE
+    result_logic: >
+      Reported as an observed metric with confidence tagged. No pass/fail
+      threshold stated in the PDF for knee angle specifically (depth is
+      the proxy criterion). Reported as informational.
+    thresholds: {}
+    tags: ["knee_angle", "informational"]
+
+  # ----------------------------------------------------------------
+  # 11. GRIP (cannot assess from side view)
+  # ----------------------------------------------------------------
+  - id: "GRIP"
+    title: "Grip Width and Wrist Position"
+    source_page: 23
+    source_section: "Chapter text"
+    verbatim_quote: >
+      "Grip the bar with both hands, with the bar resting across the
+       back, hands just outside shoulder width."
+    measurement_method: >
+      Hand position relative to shoulder width requires a front or rear view.
+    side_view_assessable: false
+    side_view_assessable_reason: >
+      Grip width is a frontal-plane measurement invisible in a pure side view.
+    required_landmarks: []
+    result_logic: "cannot_assess"
+    thresholds: {}
+    tags: ["grip", "cannot_assess"]
+
+  # ----------------------------------------------------------------
+  # 12. BAR PATH VERTICAL DEVIATION
+  # ----------------------------------------------------------------
+  - id: "BAR_PATH_VERTICAL"
+    title: "Bar Path Stays Vertical (Minimal Horizontal Drift)"
+    source_page: 10
+    source_section: "Fig 2-7"
+    verbatim_quote: >
+      "The bar moves in a straight vertical line—the most efficient
+       path between two points."
+    measurement_method: >
+      Compute the bar's horizontal (x) position over all frames of the rep.
+      bar_path_std_x = standard_deviation(bar_x[rep_frames])
+      A perfectly vertical bar path → std_x = 0.
+    side_view_assessable: true
+    side_view_assessable_reason: >
+      Horizontal drift of the bar is clearly visible in a sagittal view.
+      Requires CSRT bar tracker.
+    required_landmarks: []
+    result_logic: >
+      meets = (bar_path_std_x <= BAR_PATH_STD_THRESHOLD_PX)
+      cannot_assess if bar tracker lost.
+    thresholds:
+      BAR_PATH_STD_THRESHOLD_PX:
+        value: 25
+        unit: "pixels std-dev at 1080p"
+        source: "Fig 2-7 — bar moves in straight vertical line"
+        implementation_assumption: >
+          The PDF requires a vertical bar path without specifying an exact
+          tolerance in pixels. 25px std-dev at 1080p (≈1-2 cm) is an
+          IMPLEMENTATION ASSUMPTION.
+    tags: ["bar_path", "primary"]
+
+# ------------------------------------------------------------------
+# COMMON MISTAKES SECTION  (from "Important things you're going to do wrong")
+# ------------------------------------------------------------------
+common_mistakes:
+  source_page: 25
+  source_section: "Important things you're going to do wrong"
+  items:
+    - id: "MISTAKE_TOO_SHALLOW"
+      description: "Not squatting to depth — stopping above parallel"
+      detected_by: "DEPTH_HIP_CREASE"
+    - id: "MISTAKE_FORWARD_LEAN_EXCESSIVE"
+      description: "Excessive forward lean — torso too horizontal"
+      detected_by: "BACK_ANGLE_BOTTOM"
+    - id: "MISTAKE_HEELS_UP"
+      description: "Heels rising off the floor"
+      detected_by: "partial — ankle landmark drift in side view"
+    - id: "MISTAKE_KNEES_IN"
+      description: "Knees caving inward (valgus)"
+      detected_by: "KNEE_TRACKING (cannot assess from side view)"
+    - id: "MISTAKE_LOOKING_UP"
+      description: "Looking up instead of down"
+      detected_by: "EYE_GAZE"
+    - id: "MISTAKE_BAR_DRIFT"
+      description: "Bar drifting forward away from midfoot"
+      detected_by: "BAR_OVER_MIDFOOT"
+
+# ------------------------------------------------------------------
+# QUALITY GATE THRESHOLDS
+# ------------------------------------------------------------------
+quality_gate:
+  min_landmark_visibility: 0.5
+  min_frame_coverage: 0.70       # 70% of frames must have key landmarks visible
+  max_camera_sway_px: 30         # max median frame-to-frame shoulder drift
+  side_view_min_shoulder_hip_x_separation_normalized: 0.05  # shoulders/hips must be laterally separated
+  min_video_duration_s: 2.0
+  max_video_duration_s: 60.0
+  max_file_size_mb: 100
+  accepted_formats: ["mp4", "mov", "webm"]
+  min_reps_required: 1
+

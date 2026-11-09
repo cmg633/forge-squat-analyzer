@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+.pnpm-store/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+
+# MediaPipe model & large test videos (sample downloaded separately)
+backend/tests/sample_squat.mp4
+backend/tests/sample_squat.*.mp4
+backend/tests/sample_squat.*.webm
+backend/app/pipeline/pose_landmarker_full.task
+
+# Temp outputs
+tmp/
+/tmp/
+*.log
+
+# Build outputs
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# OS files
+.DS_Store
+Thumbs.db
