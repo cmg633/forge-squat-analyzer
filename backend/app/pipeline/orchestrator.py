@@ -19,8 +19,8 @@ from app.jobs import job_store, update_job_status, JobStatus
 from app.pipeline.ingest import ingest_video
 from app.pipeline.quality_gate import run_quality_gate
 from app.pipeline.pose_tracker import track_pose, smooth_landmarks
-from app.pipeline.bar_tracker import track_bar
-from app.pipeline.rep_detector import detect_reps
+from app.pipeline.bar_tracker import track_bar, detect_barbell_presence
+from app.pipeline.rep_detector import detect_reps, has_squat_pattern
 from app.pipeline.metrics import compute_metrics
 from app.pipeline.skill_engine import load_skill, assess_rep
 from app.pipeline.coaching_agent import generate_coaching
@@ -99,6 +99,13 @@ async def run_analysis_pipeline(job_id: str, video_path: str):
             # ---- STAGE 2: Pose tracking ----
             update_job_status(job_id, JobStatus.TRACKING_POSE, "Tracking pose landmarks...", 0.15)
             raw_landmarks, pose_meta = await asyncio.to_thread(track_pose, norm_path)
+            if pose_meta.get("detection_rate", 0.0) < 0.25:
+                _fail_job(
+                    job_id,
+                    "Cannot assess: no person detected in the video. Ensure a lifter is clearly visible from a side view.",
+                )
+                return
+
             smoothed_lms = await asyncio.to_thread(smooth_landmarks, raw_landmarks, fps)
 
             # ---- STAGE 2b: Quality gate ----
@@ -120,22 +127,27 @@ async def run_analysis_pipeline(job_id: str, video_path: str):
             if not gate_passed:
                 logger.warning(f"Quality gate failed: {gate_details['failures']}")
 
-            # ---- STAGE 3: Bar tracking ----
-            update_job_status(job_id, JobStatus.TRACKING_BAR, "Tracking barbell...", 0.45)
-            bar_path = await asyncio.to_thread(track_bar, norm_path, smoothed_lms)
-
-            # ---- STAGE 4: Rep detection ----
-            update_job_status(job_id, JobStatus.COUNTING_REPS, "Detecting reps...", 0.60)
+            # ---- STAGE 3: Rep pattern & barbell check before heavy rendering ----
+            update_job_status(job_id, JobStatus.COUNTING_REPS, "Detecting reps...", 0.45)
             reps = await asyncio.to_thread(detect_reps, smoothed_lms, fps)
 
-            if not reps:
+            squat_ok, squat_reason = has_squat_pattern(reps, smoothed_lms)
+            if not squat_ok:
+                _fail_job(job_id, squat_reason)
+                return
+
+            bar_ok, bar_info = detect_barbell_presence(smoothed_lms)
+            logger.info(f"Barbell check: detected={bar_ok} info={bar_info}")
+            if not bar_ok:
                 _fail_job(
                     job_id,
-                    "No squat reps detected. Please ensure the video shows at least one full "
-                    "squat rep (descent to bottom and return to standing), recorded from a side view "
-                    "with the full body visible.",
+                    "Cannot assess: no barbell detected. Please upload a barbell squat video (bodyweight squats without a bar are not supported).",
                 )
                 return
+
+            # ---- STAGE 4: Bar tracking ----
+            update_job_status(job_id, JobStatus.TRACKING_BAR, "Tracking barbell...", 0.60)
+            bar_path = await asyncio.to_thread(track_bar, norm_path, smoothed_lms)
 
             # ---- STAGE 5: Metrics + Assessment ----
             update_job_status(job_id, JobStatus.ASSESSING, "Computing metrics and assessing...", 0.70)

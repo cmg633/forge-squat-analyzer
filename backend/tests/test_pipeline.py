@@ -530,6 +530,80 @@ class TestSafetyAndFallbacks:
         assert job.error_reason == "Something went wrong, try again"
         assert "libEGL" not in (job.error_reason or "")
 
+    def test_has_squat_pattern_rejects_walking(self):
+        """Upright/walking sway (no squat knee bend) is rejected cleanly."""
+        from app.pipeline.rep_detector import has_squat_pattern
+
+        lms = [
+            _make_lm({
+                "LEFT_HIP": {"x": 0.4, "y": 0.50, "visibility": 0.9},
+                "RIGHT_HIP": {"x": 0.4, "y": 0.50, "visibility": 0.9},
+                "LEFT_KNEE": {"x": 0.42, "y": 0.70, "visibility": 0.9},
+                "RIGHT_KNEE": {"x": 0.42, "y": 0.70, "visibility": 0.9},
+                "LEFT_ANKLE": {"x": 0.41, "y": 0.90, "visibility": 0.9},
+                "RIGHT_ANKLE": {"x": 0.41, "y": 0.90, "visibility": 0.9},
+            })
+            for _ in range(30)
+        ]
+        fake_rep = [{"rep_number": 1, "start_frame": 0, "bottom_frame": 15, "end_frame": 29, "depth_delta_y": 0.12}]
+        ok, reason = has_squat_pattern(fake_rep, lms)
+        assert not ok
+        assert "no squat pattern detected" in reason.lower()
+
+    def test_detect_barbell_presence_rejects_bodyweight_no_bar(self):
+        """Bodyweight squats (arms extended forward or hanging down) fail barbell detection; rack grip passes."""
+        from app.pipeline.bar_tracker import detect_barbell_presence
+
+        bodyweight_lms = [
+            _make_lm({
+                "LEFT_SHOULDER": {"x": 0.50, "y": 0.35, "visibility": 0.9},
+                "RIGHT_SHOULDER": {"x": 0.50, "y": 0.35, "visibility": 0.9},
+                "LEFT_WRIST": {"x": 0.72, "y": 0.35, "visibility": 0.9},
+                "RIGHT_WRIST": {"x": 0.72, "y": 0.35, "visibility": 0.9},
+            })
+            for _ in range(20)
+        ]
+        ok_bw, _ = detect_barbell_presence(bodyweight_lms)
+        assert not ok_bw
+
+        barbell_lms = [
+            _make_lm({
+                "LEFT_SHOULDER": {"x": 0.50, "y": 0.35, "visibility": 0.9},
+                "RIGHT_SHOULDER": {"x": 0.50, "y": 0.35, "visibility": 0.9},
+                "LEFT_WRIST": {"x": 0.52, "y": 0.33, "visibility": 0.9},
+                "RIGHT_WRIST": {"x": 0.52, "y": 0.33, "visibility": 0.9},
+            })
+            for _ in range(20)
+        ]
+        ok_bar, _ = detect_barbell_presence(barbell_lms)
+        assert ok_bar
+
+    @pytest.mark.asyncio
+    async def test_pipeline_rejects_no_person(self, monkeypatch):
+        """Empty frames (low pose detection rate) fail with plain Cannot assess reason."""
+        from app.jobs import JobStatus, job_store
+        from app.models import AnalysisJob
+        from app.pipeline import orchestrator
+
+        monkeypatch.setattr(
+            orchestrator,
+            "ingest_video",
+            lambda p: (p, {"output_fps": 15.0, "output_width": 640, "output_height": 480, "duration_s": 5.0, "output_total_frames": 75}),
+        )
+        monkeypatch.setattr(
+            orchestrator,
+            "track_pose",
+            lambda p: ([None] * 75, {"total_frames": 75, "frames_with_pose": 0, "detection_rate": 0.0, "fps": 15.0}),
+        )
+        job_id = "test-no-person-001"
+        job_store[job_id] = AnalysisJob(job_id=job_id, status=JobStatus.UPLOADING)
+
+        await orchestrator.run_analysis_pipeline(job_id, "empty.mp4")
+
+        job = job_store[job_id]
+        assert job.status == JobStatus.FAILED
+        assert "no person detected" in (job.error_reason or "").lower()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

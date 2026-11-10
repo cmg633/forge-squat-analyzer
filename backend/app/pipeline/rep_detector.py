@@ -63,26 +63,26 @@ def detect_reps(
         x = np.arange(n)
         hip_y = np.interp(x, x[~nans], hip_y[~nans])
 
-    # Additional smoothing for peak detection
-    win = max(5, int(fps * 0.15))
+    # Light smoothing scaled to fps so 15fps preserves rapid transitions
+    win = max(3, int(round(fps * 0.13)))
     if win % 2 == 0:
         win += 1
     win = min(win, n if n % 2 == 1 else n - 1)
-    win = max(win, 5)
+    win = max(win, 3)
     try:
-        hip_y_smooth = savgol_filter(hip_y, win, 2)
+        hip_y_smooth = savgol_filter(hip_y, win, min(2, win - 1)) if n >= win else hip_y
     except Exception:
         hip_y_smooth = hip_y
 
     # Find bottoms (peaks in hip_y = hip descending furthest)
     min_distance = int(fps * 0.8)   # min 0.8 seconds between reps
-    prominence = float(np.std(hip_y_smooth) * 0.4)  # dynamic prominence
+    prominence = float(np.std(hip_y_smooth) * 0.3)  # dynamic prominence scaled for 15fps
 
     bottoms, props = find_peaks(
         hip_y_smooth,
         distance=max(min_distance, 5),
-        prominence=max(prominence, 0.02),
-        width=int(fps * 0.1),
+        prominence=max(prominence, 0.05),
+        width=max(1, int(fps * 0.08)),
     )
 
     logger.info(f"Detected {len(bottoms)} rep bottoms at frames: {bottoms.tolist()}")
@@ -115,6 +115,42 @@ def detect_reps(
 
     logger.info(f"Rep detection complete: {len(reps)} reps")
     return reps
+
+
+def has_squat_pattern(
+    reps: List[dict],
+    smoothed_landmarks: List[Optional[dict]],
+) -> Tuple[bool, str]:
+    """
+    Verify candidate reps represent an actual squat pattern rather than walking or standing sway.
+    Checks meaningful vertical hip drop (>= 0.08 normalized) and, when knees/ankles are visible,
+    genuine knee flexion (<= 135 deg) in at least one rep.
+    """
+    if not reps:
+        return False, "Cannot assess: no squat pattern detected."
+
+    from app.pipeline.metrics import _compute_knee_angle
+
+    max_drop = max((r.get("depth_delta_y", 0.0) for r in reps), default=0.0)
+    if max_drop < 0.08:
+        return False, "Cannot assess: no squat pattern detected (insufficient hip descent)."
+
+    knee_angles = []
+    for rep in reps:
+        bf = rep["bottom_frame"]
+        lm = smoothed_landmarks[bf] if bf < len(smoothed_landmarks) else None
+        if lm is not None:
+            kn = _compute_knee_angle(lm)
+            if kn.get("value") is not None:
+                knee_angles.append(float(kn["value"]))
+
+    if knee_angles and min(knee_angles) > 135.0:
+        return (
+            False,
+            "Cannot assess: no squat pattern detected (lifter appears upright or walking rather than squatting).",
+        )
+
+    return True, "OK"
 
 
 def _find_standing_before(hip_y: np.ndarray, bottom: int) -> int:

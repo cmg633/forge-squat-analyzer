@@ -184,3 +184,47 @@ def _smooth_bar_path(bar_path: List[Optional[dict]], window: int = 5) -> List[Op
 
     return result
 
+
+def detect_barbell_presence(smoothed_landmarks: List[Optional[dict]]) -> Tuple[bool, dict]:
+    """
+    Check whether the lifter holds a barbell in a squat rack posture (wrists tucked near shoulder height)
+    across enough frames, distinguishing barbell squats from bodyweight squats with no bar.
+    """
+    checked = 0
+    grip_hits = 0
+
+    for lm in smoothed_landmarks:
+        if not lm:
+            continue
+        ls = lm.get("LEFT_SHOULDER")
+        rs = lm.get("RIGHT_SHOULDER")
+        lw = lm.get("LEFT_WRIST")
+        rw = lm.get("RIGHT_WRIST")
+        if not (ls and rs and lw and rw):
+            continue
+        has_shoulder = ls.get("visibility", 0) > 0.3 or rs.get("visibility", 0) > 0.3
+        has_wrist = lw.get("visibility", 0) > 0.3 or rw.get("visibility", 0) > 0.3
+        if not (has_shoulder and has_wrist):
+            continue
+
+        checked += 1
+        dists = []
+        if lw.get("visibility", 0) > 0.3 and ls.get("visibility", 0) > 0.3 and lw["y"] <= ls["y"] + 0.10:
+            dists.append(float(np.hypot(lw["x"] - ls["x"], lw["y"] - ls["y"])))
+        if rw.get("visibility", 0) > 0.3 and rs.get("visibility", 0) > 0.3 and rw["y"] <= rs["y"] + 0.10:
+            dists.append(float(np.hypot(rw["x"] - rs["x"], rw["y"] - rs["y"])))
+
+        sx = (ls["x"] + rs["x"]) / 2
+        sy = (ls["y"] + rs["y"]) / 2
+        wx = (lw["x"] + rw["x"]) / 2
+        wy = (lw["y"] + rw["y"]) / 2
+        if wy <= sy + 0.10:
+            dists.append(float(np.hypot(wx - sx, wy - sy)))
+
+        if dists and min(dists) < 0.14:
+            grip_hits += 1
+
+    ratio = (grip_hits / checked) if checked > 0 else 0.0
+    detected = checked >= 3 and grip_hits >= 3 and ratio >= 0.08
+    return detected, {"checked_frames": checked, "grip_frames": grip_hits, "grip_ratio": round(ratio, 3)}
+

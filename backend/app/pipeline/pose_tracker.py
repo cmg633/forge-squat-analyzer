@@ -151,12 +151,12 @@ def smooth_landmarks(all_landmarks: List[Optional[List]], fps: float) -> List[Op
                 zs[fi, li] = lm.z
                 vs[fi, li] = lm.visibility
 
-    # Determine window for SG filter (must be odd, at least 5 frames)
-    window = max(5, int(fps * 0.1))
+    # Determine window for SG filter (must be odd, scaled to fps so 15fps isn't over-smoothed)
+    window = max(3, int(round(fps * 0.1)))
     if window % 2 == 0:
         window += 1
     window = min(window, n_frames if n_frames % 2 == 1 else n_frames - 1)
-    window = max(window, 5)
+    window = max(window, 3)
     polyorder = min(2, window - 1)
 
     # Smooth each coordinate
