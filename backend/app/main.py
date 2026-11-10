@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -54,6 +54,12 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception(f"Unhandled error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(status_code=500, content={"detail": "Something went wrong, try again"})
 
 # CORS retained for local Vite dev or optional external origins
 origins = [
@@ -139,7 +145,7 @@ async def get_results(job_id: str):
         raise HTTPException(400, f"Job not done yet. Status: {job.status}")
     result_path = OUTPUT_DIR / f"{job_id}_result.json"
     if not result_path.exists():
-        raise HTTPException(500, "Result file missing.")
+        raise HTTPException(500, "Something went wrong, try again")
     with open(result_path) as f:
         data = json.load(f)
     return AnalysisResult(**data)
@@ -155,7 +161,7 @@ async def get_frames(job_id: str):
         raise HTTPException(400, "Job not done yet.")
     frames_path = OUTPUT_DIR / f"{job_id}_frames.json"
     if not frames_path.exists():
-        raise HTTPException(500, "Frames file missing.")
+        raise HTTPException(500, "Something went wrong, try again")
     with open(frames_path) as f:
         data = json.load(f)
     return JSONResponse(content=data)
@@ -171,7 +177,7 @@ async def get_annotated_video(job_id: str):
         raise HTTPException(400, "Job not done yet.")
     video_path = OUTPUT_DIR / f"{job_id}_annotated.mp4"
     if not video_path.exists():
-        raise HTTPException(500, "Annotated video not found.")
+        raise HTTPException(500, "Something went wrong, try again")
     return FileResponse(
         str(video_path),
         media_type="video/mp4",

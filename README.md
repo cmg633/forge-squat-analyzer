@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <strong>Live App:</strong> <a href="https://forge-squat-analyzer.onrender.com">https://forge-squat-analyzer.onrender.com</a> •
+  <a href="https://forge-squat-analyzer.onrender.com/health">Health</a> •
+  <a href="https://forge-squat-analyzer.onrender.com/docs">API Docs</a>
+</p>
+
+<p align="center">
   <a href="#quickstart">Quickstart</a> •
   <a href="#neo-brutalist-design-system">Design System</a> •
   <a href="#architecture">Architecture</a> •

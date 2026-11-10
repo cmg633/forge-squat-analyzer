@@ -185,7 +185,7 @@ async def run_analysis_pipeline(job_id: str, video_path: str):
     except Exception as e:
         logger.error(f"Pipeline error for job {job_id}: {e}")
         logger.error(traceback.format_exc())
-        _fail_job(job_id, f"Internal error: {str(e)[:200]}")
+        _fail_job(job_id, "Something went wrong, try again")
 
 
 def _fail_job(job_id: str, reason: str):

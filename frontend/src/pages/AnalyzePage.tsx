@@ -69,7 +69,12 @@ export default function AnalyzePage() {
         })
         .catch((err) => {
           if (err.message !== 'Upload aborted') {
-            setError(err.message || 'Upload failed.');
+            const msg = String(err.message || '');
+            if (msg.includes('HTTP 5') || msg.includes('Network error')) {
+              setError('Something went wrong, try again');
+            } else {
+              setError(msg || 'Something went wrong, try again');
+            }
           }
         });
 
@@ -86,11 +91,13 @@ export default function AnalyzePage() {
 
     let timer: ReturnType<typeof setTimeout> | null = null;
     let isMounted = true;
+    let consecutiveFailures = 0;
 
     const poll = async () => {
       try {
         const status: JobStatusResponse = await getJobStatus(jobId);
         if (!isMounted) return;
+        consecutiveFailures = 0;
 
         setCurrentStage(status.status);
         if (status.status_message) {
@@ -135,13 +142,18 @@ export default function AnalyzePage() {
         }
 
         if (status.status === 'failed') {
-          setError(status.error_reason || 'Analysis stopped: video failed quality requirements.');
+          setError(status.error_reason || 'Something went wrong, try again');
           return;
         }
 
         timer = setTimeout(poll, 1200);
       } catch {
         if (!isMounted) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 4) {
+          setError('Something went wrong, try again');
+          return;
+        }
         timer = setTimeout(poll, 2500);
       }
     };
@@ -268,14 +280,18 @@ export default function AnalyzePage() {
           <div className="p-6 bg-[var(--card-bg)] space-y-4">
             <div className="flex items-center gap-2 text-[#F040B8]">
               <AlertTriangle size={20} />
-              <h2 className="type-h3 uppercase">Cannot assess video</h2>
+              <h2 className="type-h3 uppercase">
+                {error === 'Something went wrong, try again' ? 'Analysis failed' : 'Cannot assess video'}
+              </h2>
             </div>
             <p className="type-body bg-[var(--bg)] p-4 border border-[#F040B8]/50 text-[var(--text)]">
               {error}
             </p>
-            <p className="type-small text-[var(--text)]/65">
-              Required framing: 90° side view, full body visible, and steady camera.
-            </p>
+            {error !== 'Something went wrong, try again' && (
+              <p className="type-small text-[var(--text)]/65">
+                Required framing: 90° side view, full body visible, and steady camera.
+              </p>
+            )}
             <Button variant="primary" onClick={() => navigate('/')}>
               <ArrowLeft size={14} />
               <span>Try another video</span>

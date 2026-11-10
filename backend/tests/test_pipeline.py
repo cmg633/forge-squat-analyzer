@@ -483,6 +483,54 @@ class TestEndToEndPipeline:
         print(f"\n[E2E TEST SUCCESS] Detected {len(data['reps'])} reps, {len(data['findings'])} findings.")
 
 
+class TestSafetyAndFallbacks:
+    def test_coaching_fallback_without_api_key(self, monkeypatch):
+        """App still produces coaching text via template when GEMINI_API_KEY is missing."""
+        from app.config import settings
+        from app.pipeline.coaching_agent import generate_coaching
+
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+        monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+
+        findings = [
+            {
+                "criterion_id": "DEPTH_HIP_CREASE",
+                "title": "Hip Crease Below Top of Patella",
+                "result": "does_not_meet_standard",
+                "short_explanation": "Hip stayed above parallel.",
+                "actionable_fix": "Sit back until hip crease drops below top of knee.",
+            }
+        ]
+        out = generate_coaching(findings, {})
+        assert out.generated_by == "template"
+        assert out.llm_failed is False
+        assert out.summary != ""
+        assert len(out.top_fixes) >= 1
+
+    @pytest.mark.asyncio
+    async def test_pipeline_internal_error_sanitized(self, monkeypatch):
+        """Unhandled internal exceptions expose a friendly generic message, never raw tracebacks/lib names."""
+        from app.jobs import JobStatus, job_store
+        from app.models import AnalysisJob
+        from app.pipeline import orchestrator
+
+        def _boom(_path):
+            raise OSError("libEGL.so.1: cannot open shared object file: No such file or directory")
+
+        monkeypatch.setattr(orchestrator, "ingest_video", _boom)
+        job_id = "test-err-sanitize-001"
+        job_store[job_id] = AnalysisJob(job_id=job_id, status=JobStatus.UPLOADING)
+
+        await orchestrator.run_analysis_pipeline(job_id, "fake.mp4")
+
+        job = job_store[job_id]
+        assert job.status == JobStatus.FAILED
+        assert job.error_reason == "Something went wrong, try again"
+        assert "libEGL" not in (job.error_reason or "")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
 
