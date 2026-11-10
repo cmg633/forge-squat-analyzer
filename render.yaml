@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: forge-squat-analyzer
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false

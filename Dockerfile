@@ -49,4 +49,4 @@ ENV UPLOAD_DIR=/tmp/forge_uploads
 ENV OUTPUT_DIR=/tmp/forge_outputs
 ENV PORT=7860
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
+CMD ["sh", "-c", "exec python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers 1"]

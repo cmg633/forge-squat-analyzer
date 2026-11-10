@@ -35,6 +35,13 @@ def generate_coaching(
     """
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not gemini_key or not anthropic_key:
+        try:
+            from app.config import settings
+            gemini_key = gemini_key or settings.GEMINI_API_KEY
+            anthropic_key = anthropic_key or settings.ANTHROPIC_API_KEY
+        except Exception:
+            pass
 
     if gemini_key:
         try:
@@ -99,24 +106,46 @@ Limit top_fixes to the 3 most important issues. If everything meets standard, sa
 
 
 def _gemini_coaching(findings: List[dict], per_rep_metrics: Dict, api_key: str) -> CoachingOutput:
-    """Call Gemini API for coaching text."""
+    """Call Gemini API for coaching text across supported Flash models."""
     import json
     import urllib.request
 
     prompt = _build_prompt(findings, per_rep_metrics)
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1200,
+            "responseMimeType": "application/json",
+        },
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        response_data = json.loads(resp.read())
+    encoded_payload = json.dumps(payload).encode()
+    models = [
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3.8-flash",
+    ]
+    last_error: Optional[Exception] = None
+    response_data = None
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        req = urllib.request.Request(
+            url,
+            data=encoded_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                response_data = json.loads(resp.read())
+            break
+        except Exception as exc:
+            last_error = exc
+            logger.warning(f"Gemini model {model} failed: {exc}")
+
+    if response_data is None:
+        raise last_error or RuntimeError("All Gemini models failed")
 
     text = response_data["candidates"][0]["content"]["parts"][0]["text"]
     # Strip markdown code fences if present
