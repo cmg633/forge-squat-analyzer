@@ -59,11 +59,22 @@ def generate_coaching(
     return _template_coaching(findings, llm_failed=(bool(gemini_key) or bool(anthropic_key)))
 
 
+def _dedup_by_criterion(items: List[dict]) -> List[dict]:
+    seen = set()
+    unique = []
+    for f in items:
+        cid = f.get("criterion_id") or f.get("title")
+        if cid not in seen:
+            seen.add(cid)
+            unique.append(f)
+    return unique
+
+
 def _build_prompt(findings: List[dict], per_rep_metrics: Dict) -> str:
     """Build the LLM prompt. Very explicit constraints to prevent hallucination."""
-    fails = [f for f in findings if f["result"] == "does_not_meet_standard"]
-    meets = [f for f in findings if f["result"] == "meets_standard"]
-    cannot = [f for f in findings if f["result"] == "cannot_assess"]
+    fails = _dedup_by_criterion([f for f in findings if f["result"] == "does_not_meet_standard"])
+    meets = _dedup_by_criterion([f for f in findings if f["result"] == "meets_standard"])
+    cannot = _dedup_by_criterion([f for f in findings if f["result"] == "cannot_assess"])
 
     fails_text = "\n".join(
         f"- [{f['criterion_id']}] {f['title']}: {f['short_explanation']}"
@@ -115,19 +126,19 @@ def _gemini_coaching(findings: List[dict], per_rep_metrics: Dict, api_key: str) 
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0.3,
-            "maxOutputTokens": 1200,
+            "maxOutputTokens": 4096,
             "responseMimeType": "application/json",
         },
     }
     encoded_payload = json.dumps(payload).encode()
     models = [
-        "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
+        "gemini-flash-lite-latest",
         "gemini-3.8-flash",
     ]
     last_error: Optional[Exception] = None
-    response_data = None
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         req = urllib.request.Request(
@@ -139,32 +150,27 @@ def _gemini_coaching(findings: List[dict], per_rep_metrics: Dict, api_key: str) 
         try:
             with urllib.request.urlopen(req, timeout=20) as resp:
                 response_data = json.loads(resp.read())
-            break
+
+            text = response_data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+
+            parsed = json.loads(text.strip())
+            result = CoachingOutput(
+                summary=parsed.get("summary", ""),
+                top_fixes=parsed.get("top_fixes", [])[:3],
+                per_finding_advice=parsed.get("per_finding_advice", {}),
+                generated_by="gemini",
+                llm_failed=False,
+            )
+            return CoachingOutput.model_validate(result.model_dump())
         except Exception as exc:
             last_error = exc
             logger.warning(f"Gemini model {model} failed: {exc}")
 
-    if response_data is None:
-        raise last_error or RuntimeError("All Gemini models failed")
-
-    text = response_data["candidates"][0]["content"]["parts"][0]["text"]
-    # Strip markdown code fences if present
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-
-    parsed = json.loads(text.strip())
-    result = CoachingOutput(
-        summary=parsed.get("summary", ""),
-        top_fixes=parsed.get("top_fixes", [])[:3],
-        per_finding_advice=parsed.get("per_finding_advice", {}),
-        generated_by="gemini",
-        llm_failed=False,
-    )
-    # Validate with Pydantic
-    return CoachingOutput.model_validate(result.model_dump())
+    raise last_error or RuntimeError("All Gemini models failed")
 
 
 def _anthropic_coaching(findings: List[dict], per_rep_metrics: Dict, api_key: str) -> CoachingOutput:
