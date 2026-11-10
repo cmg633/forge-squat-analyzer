@@ -4,10 +4,13 @@ Ties together all pipeline stages and manages job state transitions.
 """
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
 import logging
 import time
 import traceback
+import weakref
 from pathlib import Path
 from typing import Optional
 
@@ -28,129 +31,156 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = Path(settings.OUTPUT_DIR)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+_loop_semaphores: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = weakref.WeakKeyDictionary()
+
+
+def _get_pipeline_semaphore() -> asyncio.Semaphore:
+    """Serialize heavy CV pipelines per event loop to stay within 512 MB RAM."""
+    loop = asyncio.get_running_loop()
+    sem = _loop_semaphores.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _loop_semaphores[loop] = sem
+    return sem
+
+
+def _assess_all_reps(reps, smoothed_lms, bar_path, width: int, height: int):
+    skill = load_skill()
+    all_findings = []
+    per_rep_metrics = {}
+    for rep in reps:
+        rep_metrics = compute_metrics(rep, smoothed_lms, bar_path, width, height)
+        per_rep_metrics[rep["rep_number"]] = {
+            k: {
+                "value": v.get("value"),
+                "unit": v.get("unit", ""),
+                "confidence": v.get("confidence", 0),
+                "is_estimated": v.get("is_estimated", False),
+                "observation_note": v.get("observation_note", ""),
+            }
+            for k, v in rep_metrics.items()
+        }
+        all_findings.extend(assess_rep(rep["rep_number"], rep, rep_metrics, skill))
+    return skill, all_findings, per_rep_metrics
+
+
+def _write_json_outputs(job_id: str, result: dict, smoothed_lms, bar_path, reps, fps: float) -> None:
+    result_path = OUTPUT_DIR / f"{job_id}_result.json"
+    with open(result_path, "w") as f:
+        json.dump(result, f, indent=2, default=str)
+
+    frames_data = _build_frames_data(smoothed_lms, bar_path, reps, fps)
+    frames_path = OUTPUT_DIR / f"{job_id}_frames.json"
+    with open(frames_path, "w") as f:
+        json.dump(frames_data, f)
+
 
 async def run_analysis_pipeline(job_id: str, video_path: str):
     """
     Main async orchestrator for the analysis pipeline.
-    Updates job status at each stage.
+    Offloads CPU/I/O stages to worker threads so /health remains responsive.
     """
     try:
-        logger.info(f"=== Pipeline start: job {job_id} ===")
+        async with _get_pipeline_semaphore():
+            logger.info(f"=== Pipeline start: job {job_id} ===")
 
-        # ---- STAGE 1: Ingest ----
-        update_job_status(job_id, JobStatus.VALIDATING, "Validating and normalizing video...", 0.05)
-        try:
-            norm_path, video_meta = ingest_video(video_path)
-        except ValueError as e:
-            _fail_job(job_id, str(e))
-            return
+            # ---- STAGE 1: Ingest ----
+            update_job_status(job_id, JobStatus.VALIDATING, "Validating and normalizing video...", 0.05)
+            try:
+                norm_path, video_meta = await asyncio.to_thread(ingest_video, video_path)
+            except ValueError as e:
+                _fail_job(job_id, str(e))
+                return
 
-        fps = video_meta["output_fps"]
-        width = video_meta["output_width"]
-        height = video_meta["output_height"]
+            fps = video_meta["output_fps"]
+            width = video_meta["output_width"]
+            height = video_meta["output_height"]
 
-        # ---- STAGE 2: Pose tracking ----
-        update_job_status(job_id, JobStatus.TRACKING_POSE, "Tracking pose landmarks...", 0.15)
-        raw_landmarks, pose_meta = track_pose(norm_path)
-        smoothed_lms = smooth_landmarks(raw_landmarks, fps)
+            # ---- STAGE 2: Pose tracking ----
+            update_job_status(job_id, JobStatus.TRACKING_POSE, "Tracking pose landmarks...", 0.15)
+            raw_landmarks, pose_meta = await asyncio.to_thread(track_pose, norm_path)
+            smoothed_lms = await asyncio.to_thread(smooth_landmarks, raw_landmarks, fps)
 
-        # ---- STAGE 2b: Quality gate ----
-        update_job_status(job_id, JobStatus.VALIDATING, "Running quality gate checks...", 0.30)
-        gate_passed, gate_details = run_quality_gate(raw_landmarks, video_meta)
-        gate_result = {
-            "passed": gate_passed,
-            "reason": " | ".join(gate_details.get("failures", [])) or None,
-            "is_side_view": gate_details.get("side_view", {}).get("is_side_view", True),
-            "full_body_visible": gate_details.get("full_body", {}).get("frame_coverage", 0) >= 0.60,
-            "landmark_visibility_ok": gate_details.get("visibility", {}).get("avg_visibility", 0) >= 0.5,
-            "camera_steady": gate_details.get("camera_steadiness", {}).get("median_frame_drift_normalized", 0) <= 0.03,
-            "details": gate_details,
-        }
+            # ---- STAGE 2b: Quality gate ----
+            update_job_status(job_id, JobStatus.VALIDATING, "Running quality gate checks...", 0.30)
+            gate_passed, gate_details = await asyncio.to_thread(run_quality_gate, raw_landmarks, video_meta)
+            del raw_landmarks
+            gc.collect()
 
-        if not gate_passed:
-            # We continue with analysis but mark it as degraded
-            logger.warning(f"Quality gate failed: {gate_details['failures']}")
-
-        # ---- STAGE 3: Bar tracking ----
-        update_job_status(job_id, JobStatus.TRACKING_BAR, "Tracking barbell...", 0.45)
-        bar_path = track_bar(norm_path, smoothed_lms)
-
-        # ---- STAGE 4: Rep detection ----
-        update_job_status(job_id, JobStatus.COUNTING_REPS, "Detecting reps...", 0.60)
-        reps = detect_reps(smoothed_lms, fps)
-
-        if not reps:
-            _fail_job(job_id,
-                "No squat reps detected. Please ensure the video shows at least one full "
-                "squat rep (descent to bottom and return to standing), recorded from a side view "
-                "with the full body visible."
-            )
-            return
-
-        # ---- STAGE 5: Metrics + Assessment ----
-        update_job_status(job_id, JobStatus.ASSESSING, "Computing metrics and assessing...", 0.70)
-        skill = load_skill()
-        all_findings = []
-        per_rep_metrics = {}
-
-        for rep in reps:
-            rep_metrics = compute_metrics(rep, smoothed_lms, bar_path, width, height)
-            per_rep_metrics[rep["rep_number"]] = {
-                k: {
-                    "value": v.get("value"),
-                    "unit": v.get("unit", ""),
-                    "confidence": v.get("confidence", 0),
-                    "is_estimated": v.get("is_estimated", False),
-                    "observation_note": v.get("observation_note", ""),
-                }
-                for k, v in rep_metrics.items()
+            gate_result = {
+                "passed": gate_passed,
+                "reason": " | ".join(gate_details.get("failures", [])) or None,
+                "is_side_view": gate_details.get("side_view", {}).get("is_side_view", True),
+                "full_body_visible": gate_details.get("full_body", {}).get("frame_coverage", 0) >= 0.60,
+                "landmark_visibility_ok": gate_details.get("visibility", {}).get("avg_visibility", 0) >= 0.5,
+                "camera_steady": gate_details.get("camera_steadiness", {}).get("median_frame_drift_normalized", 0) <= 0.03,
+                "details": gate_details,
             }
-            rep_findings = assess_rep(rep["rep_number"], rep, rep_metrics, skill)
-            all_findings.extend(rep_findings)
 
-        # ---- STAGE 6: Coaching ----
-        coaching = generate_coaching(all_findings, per_rep_metrics, skill)
+            if not gate_passed:
+                logger.warning(f"Quality gate failed: {gate_details['failures']}")
 
-        # ---- STAGE 7: Render annotated video ----
-        update_job_status(job_id, JobStatus.RENDERING, "Rendering annotated video...", 0.85)
-        annotated_path = str(OUTPUT_DIR / f"{job_id}_annotated.mp4")
-        render_annotated_video(norm_path, annotated_path, smoothed_lms, bar_path, reps, video_meta)
+            # ---- STAGE 3: Bar tracking ----
+            update_job_status(job_id, JobStatus.TRACKING_BAR, "Tracking barbell...", 0.45)
+            bar_path = await asyncio.to_thread(track_bar, norm_path, smoothed_lms)
 
-        # ---- STAGE 8: Save results ----
-        result = {
-            "job_id": job_id,
-            "filename": job_store.get(job_id, {}).filename if hasattr(job_store.get(job_id, {}), 'filename') else "upload",
-            "video_duration_s": video_meta["duration_s"],
-            "video_fps": float(fps),
-            "frame_width": width,
-            "frame_height": height,
-            "total_frames": video_meta["output_total_frames"],
-            "reps": reps,
-            "findings": all_findings,
-            "quality_gate": gate_result,
-            "coaching": coaching.model_dump(),
-            "per_rep_metrics": per_rep_metrics,
-            "skill_version": skill.get("meta", {}).get("version", "1.0.0"),
-            "pipeline_version": "1.0.0",
-        }
+            # ---- STAGE 4: Rep detection ----
+            update_job_status(job_id, JobStatus.COUNTING_REPS, "Detecting reps...", 0.60)
+            reps = await asyncio.to_thread(detect_reps, smoothed_lms, fps)
 
-        # Save full result JSON
-        result_path = OUTPUT_DIR / f"{job_id}_result.json"
-        with open(result_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+            if not reps:
+                _fail_job(
+                    job_id,
+                    "No squat reps detected. Please ensure the video shows at least one full "
+                    "squat rep (descent to bottom and return to standing), recorded from a side view "
+                    "with the full body visible.",
+                )
+                return
 
-        # Save per-frame data for canvas overlay
-        frames_data = _build_frames_data(smoothed_lms, bar_path, reps, fps)
-        frames_path = OUTPUT_DIR / f"{job_id}_frames.json"
-        with open(frames_path, "w") as f:
-            json.dump(frames_data, f)
+            # ---- STAGE 5: Metrics + Assessment ----
+            update_job_status(job_id, JobStatus.ASSESSING, "Computing metrics and assessing...", 0.70)
+            skill, all_findings, per_rep_metrics = await asyncio.to_thread(
+                _assess_all_reps, reps, smoothed_lms, bar_path, width, height
+            )
 
-        job = job_store.get(job_id)
-        if job:
-            job.filename = "upload"
+            # ---- STAGE 6: Coaching ----
+            coaching = await asyncio.to_thread(generate_coaching, all_findings, per_rep_metrics, skill)
 
-        update_job_status(job_id, JobStatus.DONE, "Analysis complete!", 1.0)
-        logger.info(f"=== Pipeline complete: job {job_id} | {len(reps)} reps | {len(all_findings)} findings ===")
+            # ---- STAGE 7: Render annotated video ----
+            update_job_status(job_id, JobStatus.RENDERING, "Rendering annotated video...", 0.85)
+            annotated_path = str(OUTPUT_DIR / f"{job_id}_annotated.mp4")
+            await asyncio.to_thread(
+                render_annotated_video, norm_path, annotated_path, smoothed_lms, bar_path, reps, video_meta
+            )
+
+            # ---- STAGE 8: Save results ----
+            result = {
+                "job_id": job_id,
+                "filename": job_store.get(job_id, {}).filename if hasattr(job_store.get(job_id, {}), "filename") else "upload",
+                "video_duration_s": video_meta["duration_s"],
+                "video_fps": float(fps),
+                "frame_width": width,
+                "frame_height": height,
+                "total_frames": video_meta["output_total_frames"],
+                "reps": reps,
+                "findings": all_findings,
+                "quality_gate": gate_result,
+                "coaching": coaching.model_dump(),
+                "per_rep_metrics": per_rep_metrics,
+                "skill_version": skill.get("meta", {}).get("version", "1.0.0"),
+                "pipeline_version": "1.0.0",
+            }
+
+            await asyncio.to_thread(_write_json_outputs, job_id, result, smoothed_lms, bar_path, reps, fps)
+            del smoothed_lms, bar_path
+            gc.collect()
+
+            job = job_store.get(job_id)
+            if job:
+                job.filename = "upload"
+
+            update_job_status(job_id, JobStatus.DONE, "Analysis complete!", 1.0)
+            logger.info(f"=== Pipeline complete: job {job_id} | {len(reps)} reps | {len(all_findings)} findings ===")
 
     except Exception as e:
         logger.error(f"Pipeline error for job {job_id}: {e}")

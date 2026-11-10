@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 MAX_DURATION_S = 60.0
 MIN_DURATION_S = 2.0
-MAX_FPS = 30
-MAX_WIDTH = 1920
-MAX_HEIGHT = 1080
+MAX_FPS = 15
+MAX_WIDTH = 854
+MAX_HEIGHT = 480
 
 
 def ingest_video(video_path: str) -> Tuple[str, dict]:
@@ -100,7 +100,6 @@ def ingest_video(video_path: str) -> Tuple[str, dict]:
 
     writer = cv2.VideoWriter(out_path, fourcc, target_fps, (out_w, out_h))
 
-    frame_step = max(1, int(fps / target_fps))
     frame_idx = 0
     written = 0
 
@@ -108,7 +107,7 @@ def ingest_video(video_path: str) -> Tuple[str, dict]:
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_idx % frame_step == 0:
+        if int(frame_idx * target_fps / fps) >= written:
             if needs_rotation:
                 frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             if scale != 1.0:
