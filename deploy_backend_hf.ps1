@@ -38,3 +38,4 @@ Write-Host "`nBackend successfully deployed!" -ForegroundColor Green
 Write-Host "Your live backend URL: https://$HfUsername-$SpaceName.hf.space" -ForegroundColor Yellow
 Write-Host "API Health Check: https://$HfUsername-$SpaceName.hf.space/health" -ForegroundColor Yellow
 Write-Host "Swagger Docs: https://$HfUsername-$SpaceName.hf.space/docs" -ForegroundColor Yellow
+

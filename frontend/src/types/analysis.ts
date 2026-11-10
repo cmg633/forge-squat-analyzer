@@ -177,16 +177,4 @@ export interface HistoryEntry {
   total_reps: number;
   overall_score: number | null;
   quality_gate_passed: boolean;
-  thumbnail_blob?: Blob;
-}
-
-// ─── Upload state (used in useAnalysis hook) ──────────────────────────────────
-
-export interface UploadState {
-  phase: 'idle' | 'uploading' | 'polling' | 'done' | 'error';
-  uploadProgress: number; // 0–100
-  jobId: string | null;
-  jobStatus: JobStatusResponse | null;
-  result: AnalysisResult | null;
-  error: string | null;
 }

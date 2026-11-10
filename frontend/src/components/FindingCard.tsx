@@ -1,147 +1,177 @@
-import { motion } from 'framer-motion';
-import { CheckCircle, XCircle, HelpCircle, ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { CheckCircle2, XCircle, HelpCircle, ChevronDown, BookOpen } from 'lucide-react';
 import type { Finding } from '../types/analysis';
+import { SelectionBox } from '../ui/SelectionBox';
+import { TagChip } from '../ui/TagChip';
 
 interface FindingCardProps {
   finding: Finding;
-  initiallyExpanded?: boolean;
+  isActive?: boolean;
+  onSelect?: () => void;
+  onCite?: (finding: Finding) => void;
 }
 
 const RESULT_CONFIG = {
   meets_standard: {
-    label: 'PASS',
-    icon: CheckCircle,
-    colorClass: 'text-forge-green',
-    bgClass: 'bg-forge-green/10',
-    borderClass: 'border-forge-green/30',
-    badgeClass: 'badge-green',
+    label: 'Meets',
+    icon: CheckCircle2,
+    color: 'lime' as const,
+    border: 'border-[#CCFF00]/60',
+    text: 'text-[#CCFF00]',
+    badgeVariant: 'lime' as const,
   },
   does_not_meet_standard: {
-    label: 'FAIL',
+    label: 'Issue',
     icon: XCircle,
-    colorClass: 'text-forge-red',
-    bgClass: 'bg-forge-red/10',
-    borderClass: 'border-forge-red/30',
-    badgeClass: 'badge-red',
+    color: 'magenta' as const,
+    border: 'border-[#F040B8]/70',
+    text: 'text-[#F040B8]',
+    badgeVariant: 'magenta' as const,
   },
   cannot_assess: {
-    label: 'N/A',
+    label: 'Cannot assess',
     icon: HelpCircle,
-    colorClass: 'text-forge-grey',
-    bgClass: 'bg-forge-grey/10',
-    borderClass: 'border-forge-grey/30',
-    badgeClass: 'badge-grey',
+    color: 'violet' as const,
+    border: 'border-[#A97BFF]/60',
+    text: 'text-[#A97BFF]',
+    badgeVariant: 'violet' as const,
   },
 };
 
-export default function FindingCard({ finding, initiallyExpanded = false }: FindingCardProps) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
-  const cfg = RESULT_CONFIG[finding.result];
-  const Icon = cfg.icon;
-
-  return (
-    <motion.div
-      layout
-      className={`rounded-xl border ${cfg.borderClass} ${cfg.bgClass} overflow-hidden`}
-    >
-      {/* Header row */}
-      <button
-        onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-start gap-3 p-4 text-left hover:bg-white/5 transition-colors min-h-[52px]"
-        aria-expanded={expanded}
-        aria-label={`${finding.title} — ${cfg.label}`}
-      >
-        <Icon size={18} className={`${cfg.colorClass} shrink-0 mt-0.5`} />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`badge ${cfg.badgeClass}`}>{cfg.label}</span>
-            {finding.has_implementation_assumption && (
-              <span className="badge badge-orange">ASSUMPTION</span>
-            )}
-            {finding.rep_number != null && (
-              <span className="badge badge-grey">REP {finding.rep_number}</span>
-            )}
-          </div>
-          <p className="mt-1 font-semibold text-sm text-white leading-snug">{finding.title}</p>
-        </div>
-        <ChevronDown
-          size={16}
-          className={`text-forge-grey shrink-0 mt-1 transition-transform duration-200 ${
-            expanded ? 'rotate-180' : ''
-          }`}
-        />
-      </button>
-
-      {/* Expanded detail */}
-      <AnimatedCollapse open={expanded}>
-        <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
-          {/* Explanation */}
-          <p className="text-forge-grey-light text-sm leading-relaxed">
-            {finding.short_explanation}
-          </p>
-
-          {/* Observed measurement */}
-          {finding.observed_measurement && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="eyebrow">Observed</span>
-              <span className="font-mono text-white">
-                {typeof finding.observed_measurement === 'object' && 'value' in finding.observed_measurement
-                  ? `${finding.observed_measurement.value ?? '—'} ${finding.observed_measurement.unit || ''}`
-                  : String(finding.observed_measurement)}
-              </span>
-            </div>
-          )}
-
-          {/* Actionable fix */}
-          {finding.result === 'does_not_meet_standard' && (
-            <div className="p-3 rounded-lg bg-forge-red/5 border border-forge-red/20">
-              <p className="eyebrow mb-1">Fix</p>
-              <p className="text-sm text-white leading-relaxed">{finding.actionable_fix}</p>
-            </div>
-          )}
-
-          {/* Uncertainty note */}
-          {finding.uncertainty_note && (
-            <p className="text-forge-grey text-xs italic leading-relaxed">
-              ⚠ {finding.uncertainty_note}
-            </p>
-          )}
-
-          {/* Implementation assumption */}
-          {finding.has_implementation_assumption && finding.implementation_assumption_text && (
-            <div className="p-3 rounded-lg bg-orange-500/5 border border-orange-500/20">
-              <p className="eyebrow mb-1" style={{ color: '#F97316' }}>Implementation Assumption</p>
-              <p className="text-xs text-forge-grey leading-relaxed">
-                {finding.implementation_assumption_text}
-              </p>
-            </div>
-          )}
-
-          {/* Source citation */}
-          <div className="flex flex-wrap gap-2 pt-1">
-            <span className="badge badge-grey">
-              p.{finding.source_page}
-            </span>
-            <span className="badge badge-grey truncate max-w-[200px]">
-              {finding.source_section}
-            </span>
-          </div>
-        </div>
-      </AnimatedCollapse>
-    </motion.div>
-  );
+function shortUnit(unit?: string): string {
+  if (!unit) return '';
+  const u = unit.toLowerCase();
+  if (u.startsWith('pixel')) return 'px';
+  if (u.startsWith('degree')) return '°';
+  if (u.startsWith('boolean')) return '';
+  return unit.split(' ')[0];
 }
 
-function AnimatedCollapse({ open, children }: { open: boolean; children: React.ReactNode }) {
-  return (
-    <motion.div
-      initial={false}
-      animate={{ height: open ? 'auto' : 0, opacity: open ? 1 : 0 }}
-      transition={{ duration: 0.25, ease: 'easeInOut' }}
-      style={{ overflow: 'hidden' }}
+export default function FindingCard({
+  finding,
+  isActive = false,
+  onSelect,
+  onCite,
+}: FindingCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const cfg = RESULT_CONFIG[finding.result] || RESULT_CONFIG.cannot_assess;
+  const Icon = cfg.icon;
+
+  const metric =
+    finding.observed_measurement && typeof finding.observed_measurement === 'object'
+      ? finding.observed_measurement
+      : null;
+
+  const isEstimated = Boolean(metric?.is_estimated);
+
+  const metricSummary = metric && metric.value !== null
+    ? `${metric.value}${shortUnit(metric.unit) ? ` ${shortUnit(metric.unit)}` : ''} · ${Math.round(metric.confidence * 100)}%`
+    : finding.result === 'cannot_assess'
+    ? 'Requires non-side view'
+    : 'Informational';
+
+  const cardBody = (
+    <div
+      onClick={onSelect}
+      className={`bg-[var(--card-bg)] border ${cfg.border} transition-colors duration-150 ${
+        onSelect ? 'cursor-pointer hover:border-[#CCFF00]' : ''
+      }`}
     >
-      {children}
-    </motion.div>
+      <div className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Icon size={15} className={cfg.text} />
+            <TagChip label={cfg.label} variant={cfg.badgeVariant} />
+            {finding.has_implementation_assumption && (
+              <TagChip label="Assumption" variant="yellow" />
+            )}
+            {metric && (
+              <TagChip label={isEstimated ? 'Est.' : 'Obs.'} variant="outline" />
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCite?.(finding);
+            }}
+            className="type-mono text-[11px] text-[#A97BFF] hover:text-[#CCFF00] inline-flex items-center gap-1 shrink-0"
+            title="Inspect Starting Strength source citation"
+          >
+            <BookOpen size={12} />
+            <span>p.{finding.source_page}</span>
+          </button>
+        </div>
+
+        <div className="space-y-1">
+          <h4 className="type-h3 text-[var(--text)] leading-snug">{finding.title}</h4>
+          <p className="type-small text-[var(--text)]/75 line-clamp-2">
+            {finding.short_explanation}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-[var(--hairline)]">
+          <span className="type-mono text-[var(--text)]/65">{metricSummary}</span>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((prev) => !prev);
+            }}
+            aria-expanded={expanded}
+            className="font-pixel text-[10px] uppercase text-[#CCFF00] hover:underline inline-flex items-center gap-1"
+          >
+            <span>{expanded ? 'Hide details' : 'Details'}</span>
+            <ChevronDown size={13} className={`transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="px-4 pb-4 pt-3 border-t border-[var(--hairline)] bg-[var(--bg)] space-y-3 type-small">
+          <p className="text-[var(--text)]/85">{finding.short_explanation}</p>
+
+          {finding.actionable_fix && (
+            <div className="p-3 border border-[var(--hairline)] bg-[var(--card-bg)] space-y-1">
+              <div className="type-eyebrow text-[#CCFF00]">Fix cue</div>
+              <p className="text-[var(--text)]/90">{finding.actionable_fix}</p>
+            </div>
+          )}
+
+          {finding.uncertainty_note && (
+            <div className="p-3 border border-[#A97BFF]/50 bg-[#A97BFF]/10 space-y-1">
+              <div className="type-eyebrow text-[#A97BFF]">Uncertainty</div>
+              <p className="text-[var(--text)]/85">{finding.uncertainty_note}</p>
+            </div>
+          )}
+
+          {finding.has_implementation_assumption && finding.implementation_assumption_text && (
+            <div className="p-3 border border-[#F5FF00]/60 bg-[#F5FF00]/10 space-y-1">
+              <div className="type-eyebrow text-[#F5FF00]">Implementation assumption</div>
+              <p className="text-[var(--text)]/85">{finding.implementation_assumption_text}</p>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-1 type-mono text-[var(--text)]/60">
+            <span>
+              Starting Strength p.{finding.source_page} ({finding.source_section})
+            </span>
+            {finding.timestamp_s != null && <span>{finding.timestamp_s.toFixed(2)}s</span>}
+          </div>
+        </div>
+      )}
+    </div>
   );
+
+  if (isActive) {
+    return (
+      <SelectionBox color={cfg.color} cornerSize={6}>
+        {cardBody}
+      </SelectionBox>
+    );
+  }
+
+  return cardBody;
 }

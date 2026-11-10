@@ -204,3 +204,15 @@ docker compose up
 
 **Missing tokens in this build:** HF_TOKEN and VERCEL_TOKEN were not set in the environment. All files are ready. Run the deployment commands above with valid tokens to deploy.
 
+---
+
+## Neo-Brutalist Design Redesign (Pixel-Grid x Kinetic Type)
+
+### Design Direction & Rationale
+The UI was overhauled to adopt an energetic **Neo-Brutalist Pixel-Grid x Kinetic Type** aesthetic:
+- **Tokens**: Acid Lime (`#CCFF00`), Signal Yellow (`#F5FF00`), Hot Magenta (`#F040B8`), Violet (`#A97BFF`), Ink (`#0A0A0A`), Paper (`#F4F4EE`).
+- **Typography**: `Archivo` 900 heavy grotesk (Roman & Italic mix), `Silkscreen` pixel accent, `JetBrains Mono` live metrics.
+- **Micro-Interactions**: Figma-style `SelectionBox` (dashed border + 4 corner square handles), `PixelTile` with 3D spring tilt, draggable `TagChip` components, Lenis smooth scroll, reactive dot-matrix upload ripple, and Konami code easter egg.
+- **Component Library**: Centralized in `/frontend/src/ui/` with a live visual showcase at `/design`.
+
+

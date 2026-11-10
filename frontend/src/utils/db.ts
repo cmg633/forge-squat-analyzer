@@ -45,11 +45,6 @@ export async function getAllHistory(): Promise<HistoryEntry[]> {
   return all.reverse(); // newest first
 }
 
-export async function getHistoryEntry(jobId: string): Promise<HistoryEntry | undefined> {
-  const db = await getDb();
-  return db.get(STORE, jobId);
-}
-
 export async function deleteHistory(jobId: string): Promise<void> {
   const db = await getDb();
   await db.delete(STORE, jobId);

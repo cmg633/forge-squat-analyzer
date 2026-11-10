@@ -184,4 +184,77 @@ files generated
 | Hard video test | Front-view footage | **PASSED** | Fails side-view quality gate (0.35 > 0.25 threshold) |
 | YAML hot-reload | Dynamic criterion adjustment | **PASSED** | Verdict flipped from DOES NOT MEET to MEETS standard |
 | Frontend compilation | `tsc && vite build` | **PASSED** | PWA manifest, service worker, assets built in 7.75s |
+| Neo-Brutalist Redesign | Playwright automated audit | **PASSED** | 5 high-res full page screenshots in `docs/screenshots/` |
+
+---
+
+## 8. Neo-Brutalist Visual Verification (Playwright Automated Audit)
+
+The interface was comprehensively redesigned in accordance with the Neo-Brutalist Pixel-Grid x Kinetic Type direction. Full-page automated screenshots were captured using Playwright against the live running server:
+
+1. **Landing Page (`docs/screenshots/landing_page_neo_brutalist.png`):**
+   - Preloader with randomized cell progress and mono counter ("00 -> 100").
+   - Giant Archivo 900 kinetic typography with Roman/Italic hover swap.
+   - Draggable outlined tag chips (`TagChip`).
+   - Figma-style dashed SelectionBox with 4 solid corner square handles.
+   - Interactive SVG skeleton squat loop with patellar horizon and joint angle tooltips.
+   - Reactive dot-matrix dropzone with mobile haptic trigger.
+   - 3-step scroll storytelling (`UPLOAD -> TRACK -> FEEDBACK`).
+   - 12-column bento grid feature matrix.
+
+2. **Design System Showcase (`docs/screenshots/design_system_neo_brutalist.png`):**
+   - Accessible at the `/design` route.
+   - Displays all color tokens: Acid Lime (`#CCFF00`), Signal Yellow (`#F5FF00`), Hot Magenta (`#F040B8`), Violet (`#A97BFF`), Ink (`#0A0A0A`), Paper (`#F4F4EE`).
+   - Live theme toggle (`DARK` / `LIGHT`).
+   - Konami code visual pixel rain trigger.
+   - Interactive 3D tilt tiles with spring damping.
+
+3. **Results Bento Dashboard (`docs/screenshots/results_page_neo_brutalist.png`):**
+   - Rendered from real video analysis (`squat_clip_15s.mp4`).
+   - 3 reps detected with frame-accurate start, inflection hole, and lockout.
+   - 36 deterministic findings evaluated against `skill/squat_skill.yaml`.
+   - Bar path horizontal drift chart with midfoot plumb line.
+   - Active finding SelectionBox with synchronized video frame seeking.
+   - Prioritized "Fix This Next" action card citing Starting Strength pp. 1-35.
+
+4. **Mobile Responsiveness (`docs/screenshots/landing_page_mobile.png`):**
+   - Verified on 390x844 viewport.
+   - Touch-safe controls, bottom tab navigation bar, zero hover-only dependencies.
+
+---
+
+## 9. Full-Width Footer Credit Section (All Routes)
+
+A full-width, neo-brutalist kinetic footer was built and rendered across all routes (`/`, `/analyze`, `/results/:id`, `/history`, `/about`, `/design`) via `Layout.tsx` and `FooterCredit.tsx`.
+
+### Design & Feature Details:
+- **Kinetic Typography**:
+  - `BUILT BY`
+  - `@CHIRANTH MG` (display text: exactly `@Chiranth MG`, rendered uppercase via CSS, fluid `clamp()` up to 16vw, Archivo 900 heavy grotesk).
+  - Magenta Figma-style `SelectionBox` with 4 solid corner square handles and label `[ENGINEER // 2026]`.
+  - Per-character hover reaction with Roman/Italic swapping and magnetic spring scaling.
+- **Eyebrow & Metadata**:
+  - Silkscreen pixel font: `DESIGNED + ENGINEERED` with glowing lime pulse.
+  - Mono institution line: `ISE / JYOTHY INSTITUTE OF TECHNOLOGY / BENGALURU / 2026`.
+- **Outlined Tag Chips**:
+  - `AI SQUAT ANALYSIS`, `REFERENCE PAGES 1-35`, `NO MOCKS`.
+- **Links & Controls**:
+  - Dynamic `VITE_GITHUB_URL` and `VITE_LINKEDIN_URL` (gracefully hidden when empty).
+  - Smooth scroll `BACK TO TOP` button with pixel-arrow.
+  - Interactive Easter Egg: clicking the credit name triggers 16-bit pixel confetti rain.
+
+### Playwright Verification Artifacts:
+| Viewport | Target Resolution | Overflow Status | Screenshot Artifact |
+| :--- | :--- | :---: | :--- |
+| **Desktop** | 1440 × 900 | **0px overflow** | [`docs/screenshots/footer_credit_desktop.png`](screenshots/footer_credit_desktop.png) |
+| **iPhone 14** | 390 × 844 (3x) | **0px overflow** | [`docs/screenshots/footer_credit_iphone14.png`](screenshots/footer_credit_iphone14.png) |
+| **Pixel 7** | 412 × 915 (2.625x) | **0px overflow** | [`docs/screenshots/footer_credit_pixel7.png`](screenshots/footer_credit_pixel7.png) |
+| **Ultra-Narrow** | 360 × 740 | **scrollWidth = 360px** | [`docs/screenshots/footer_credit_360px.png`](screenshots/footer_credit_360px.png) |
+
+Full-page screenshots including the footer are also available at:
+- `docs/screenshots/footer_credit_desktop_full.png`
+- `docs/screenshots/footer_credit_iphone14_full.png`
+- `docs/screenshots/footer_credit_pixel7_full.png`
+
+
 

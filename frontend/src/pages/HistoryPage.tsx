@@ -1,120 +1,98 @@
-import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Clock, Trash2, ArrowRight, Video, AlertCircle } from 'lucide-react';
+import React from 'react';
+import { Clock, Trash2, ArrowRight, AlertCircle } from 'lucide-react';
 import { useHistory } from '../hooks/useHistory';
 import { formatTimestamp } from '../utils/format';
-import SkeletonLoader from '../components/SkeletonLoader';
+import { TagChip } from '../ui/TagChip';
+import { SelectionBox } from '../ui/SelectionBox';
+import { Button, ButtonLink } from '../ui/Button';
 
 export default function HistoryPage() {
   const { history, loading, removeEntry, clearAll } = useHistory();
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-forge-border pb-4">
-        <div>
-          <span className="eyebrow">LOCAL STORAGE</span>
-          <h1 className="display-heading text-3xl text-white">ANALYSIS HISTORY</h1>
+    <div className="max-w-5xl mx-auto px-4 sm:px-8 py-8 sm:py-12 space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--hairline)] pb-4">
+        <div className="space-y-1">
+          <div className="type-eyebrow text-[#CCFF00]">Saved locally</div>
+          <h1 className="type-h2">History</h1>
         </div>
 
         {history.length > 0 && (
-          <button
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => {
               if (confirm('Clear all local analysis history?')) clearAll();
             }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-forge-surface border border-forge-border text-xs text-forge-grey hover:text-forge-red hover:border-forge-red/30 transition-colors"
+            className="border-[#F040B8] text-[#F040B8] hover:bg-[#F040B8] hover:text-[#0A0A0A]"
           >
-            <Trash2 size={13} />
-            Clear All
-          </button>
+            <Trash2 size={14} />
+            <span>Clear all</span>
+          </Button>
         )}
       </div>
 
-      {/* Ephemeral Notice Banner */}
-      <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-white/5 border border-forge-border text-xs text-forge-grey">
-        <AlertCircle size={16} className="text-forge-red shrink-0 mt-0.5" />
-        <p>
-          <strong className="text-white">Note:</strong> Analyses are indexed locally on your device. Video files on the backend server expire after a 6-hour TTL window to protect privacy and optimize storage.
-        </p>
+      <div className="p-3 bg-[var(--card-bg)] border border-[var(--hairline)] flex items-center gap-3 type-small text-[var(--text)]/75">
+        <AlertCircle size={16} className="text-[#CCFF00] shrink-0" />
+        <span>Analyses are stored in this browser. Server video files expire after 6 hours.</span>
       </div>
 
-      {/* History List */}
       {loading ? (
         <div className="space-y-3">
-          <SkeletonLoader variant="card" height="h-20" />
-          <SkeletonLoader variant="card" height="h-20" />
-          <SkeletonLoader variant="card" height="h-20" />
+          <div className="h-20 bg-[var(--card-bg)] border border-[var(--hairline)] animate-pulse" />
+          <div className="h-20 bg-[var(--card-bg)] border border-[var(--hairline)] animate-pulse" />
         </div>
       ) : history.length === 0 ? (
-        <div className="text-center py-16 space-y-4 glass-card rounded-2xl border border-forge-border p-8">
-          <div className="w-12 h-12 rounded-2xl bg-forge-surface border border-forge-border mx-auto flex items-center justify-center text-forge-grey">
-            <Clock size={24} />
-          </div>
-          <div className="space-y-1">
-            <h3 className="font-display font-bold text-xl uppercase text-white">
-              NO PAST ANALYSES
-            </h3>
-            <p className="text-forge-grey text-xs max-w-sm mx-auto">
-              Upload a side-view barbell squat video to receive a comprehensive kinematic assessment.
+        <SelectionBox color="violet" cornerSize={6}>
+          <div className="text-center py-12 px-6 bg-[var(--card-bg)] space-y-4">
+            <Clock size={28} className="text-[#A97BFF] mx-auto" />
+            <h2 className="type-h3">No saved analyses yet</h2>
+            <p className="type-small text-[var(--text)]/65 max-w-sm mx-auto">
+              Upload a side-view barbell squat clip to start recording your form history.
             </p>
+            <ButtonLink to="/" variant="primary">
+              Analyze a video
+            </ButtonLink>
           </div>
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-forge-red text-white font-display font-bold text-xs uppercase tracking-wider hover:bg-forge-red-dark transition-colors"
-          >
-            Start First Analysis
-          </Link>
-        </div>
+        </SelectionBox>
       ) : (
         <div className="space-y-3">
           {history.map((entry) => (
-            <motion.div
+            <div
               key={entry.job_id}
-              layout
-              className="glass-card p-4 rounded-xl border border-forge-border flex items-center justify-between gap-4 hover:border-forge-red/40 transition-colors group"
+              className="p-4 bg-[var(--card-bg)] border border-[var(--hairline)] hover:border-[#CCFF00] flex flex-wrap items-center justify-between gap-4 transition-colors"
             >
-              <div className="flex items-center gap-3.5 min-w-0">
-                <div className="w-10 h-10 rounded-lg bg-forge-surface border border-forge-border flex items-center justify-center text-forge-red shrink-0">
-                  <Video size={18} />
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="type-h3 truncate">{entry.filename || 'Squat video'}</span>
+                  <TagChip
+                    label={entry.quality_gate_passed ? 'Passed' : 'Degraded'}
+                    variant={entry.quality_gate_passed ? 'lime' : 'magenta'}
+                  />
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-display font-bold text-white text-base truncate">
-                      {entry.filename || 'Squat Recording'}
-                    </span>
-                    <span
-                      className={`badge text-[9px] py-0 ${
-                        entry.quality_gate_passed ? 'badge-green' : 'badge-red'
-                      }`}
-                    >
-                      {entry.quality_gate_passed ? 'PASSED' : 'DEGRADED'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-forge-grey mt-0.5">
-                    <span>{formatTimestamp(entry.analyzed_at)}</span>
-                    <span>·</span>
-                    <span>{entry.total_reps} reps detected</span>
-                  </div>
+                <div className="flex items-center gap-3 type-mono text-[var(--text)]/65">
+                  <span>{formatTimestamp(entry.analyzed_at)}</span>
+                  <span>·</span>
+                  <span className="text-[#CCFF00]">{entry.total_reps} reps</span>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <Link
-                  to={`/results/${entry.job_id}`}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-forge-surface border border-forge-border text-xs text-white hover:bg-forge-red hover:border-forge-red transition-colors font-semibold"
-                >
-                  View
+                <ButtonLink to={`/results/${entry.job_id}`} variant="primary" size="sm">
+                  <span>View</span>
                   <ArrowRight size={13} />
-                </Link>
-                <button
+                </ButtonLink>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => removeEntry(entry.job_id)}
-                  className="p-1.5 rounded-lg text-forge-grey hover:text-forge-red transition-colors"
-                  title="Remove from history"
+                  aria-label={`Remove ${entry.filename || 'entry'} from history`}
+                  className="text-[var(--text)]/55 hover:text-[#F040B8]"
                 >
                   <Trash2 size={15} />
-                </button>
+                </Button>
               </div>
-            </motion.div>
+            </div>
           ))}
         </div>
       )}

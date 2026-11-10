@@ -1,169 +1,458 @@
-import { useEffect, useRef, useCallback } from 'react';
-import type { LandmarkFrame, BarPathFrame } from '../types/analysis';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { Play, Pause, SkipBack, SkipForward, Layers } from 'lucide-react';
+import { Button } from '../ui/Button';
+import type { LandmarkPoint } from '../types/analysis';
 
-// MediaPipe Pose landmark connections
-const POSE_CONNECTIONS: [number, number][] = [
-  [11, 12], // shoulders
-  [11, 13], [13, 15], // left arm
-  [12, 14], [14, 16], // right arm
-  [11, 23], [12, 24], // torso sides
-  [23, 24], // hips
-  [23, 25], [25, 27], [27, 29], [29, 31], // left leg
-  [24, 26], [26, 28], [28, 30], [30, 32], // right leg
-];
+interface FrameItem {
+  frame_index: number;
+  timestamp_s: number;
+  landmarks?: Record<string, LandmarkPoint> | null;
+  bar?: { x: number; y: number; confidence: number; tracked: boolean } | null;
+  rep_number?: number | null;
+  is_bottom?: boolean;
+}
+
+interface RepInfo {
+  rep_number: number;
+  start_timestamp_s: number;
+  end_timestamp_s: number;
+}
 
 interface VideoPlayerProps {
   videoUrl: string;
-  frames?: LandmarkFrame[];
-  barPath?: BarPathFrame[];
-  repBoundaries?: Array<{ rep_number: number; start_frame: number; end_frame: number }>;
-  onTimeUpdate?: (currentTime: number) => void;
-  currentRep?: number | null;
-  className?: string;
+  fps?: number;
+  durationFallback?: number;
+  frames?: FrameItem[];
+  reps?: RepInfo[];
+  activeRep: number | null;
+  onSelectRep: (rep: number | null) => void;
+  seekTimestamp: number | null;
 }
+
+const SKELETON_EDGES: Array<[string, string]> = [
+  ['LEFT_SHOULDER', 'RIGHT_SHOULDER'],
+  ['LEFT_SHOULDER', 'LEFT_ELBOW'],
+  ['LEFT_ELBOW', 'LEFT_WRIST'],
+  ['RIGHT_SHOULDER', 'RIGHT_ELBOW'],
+  ['RIGHT_ELBOW', 'RIGHT_WRIST'],
+  ['LEFT_SHOULDER', 'LEFT_HIP'],
+  ['RIGHT_SHOULDER', 'RIGHT_HIP'],
+  ['LEFT_HIP', 'RIGHT_HIP'],
+  ['LEFT_HIP', 'LEFT_KNEE'],
+  ['LEFT_KNEE', 'LEFT_ANKLE'],
+  ['LEFT_ANKLE', 'LEFT_HEEL'],
+  ['LEFT_HEEL', 'LEFT_FOOT_INDEX'],
+  ['RIGHT_HIP', 'RIGHT_KNEE'],
+  ['RIGHT_KNEE', 'RIGHT_ANKLE'],
+  ['RIGHT_ANKLE', 'RIGHT_HEEL'],
+  ['RIGHT_HEEL', 'RIGHT_FOOT_INDEX'],
+];
 
 export default function VideoPlayer({
   videoUrl,
+  fps = 30,
+  durationFallback = 0,
   frames = [],
-  barPath = [],
-  repBoundaries = [],
-  onTimeUpdate,
-  currentRep,
-  className = '',
+  reps = [],
+  activeRep,
+  onSelectRep,
+  seekTimestamp,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number | null>(null);
-  const lastFrameRef = useRef<number>(-1);
+  const frameMapRef = useRef<Map<number, FrameItem>>(new Map());
 
-  // Index frames and bar path by frame index for O(1) lookup
-  const frameMap = useRef<Map<number, LandmarkFrame>>(new Map());
-  const barMap = useRef<Map<number, BarPathFrame>>(new Map());
-
-  useEffect(() => {
-    frameMap.current = new Map(frames.map(f => [f.frame_index, f]));
-  }, [frames]);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(durationFallback);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [videoDecodeFailed, setVideoDecodeFailed] = useState(false);
 
   useEffect(() => {
-    barMap.current = new Map(barPath.map(b => [b.frame_index, b]));
-  }, [barPath]);
-
-  const drawFrame = useCallback((frameIndex: number, videoWidth: number, videoHeight: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Resize canvas to match video dimensions
-    if (canvas.width !== videoWidth || canvas.height !== videoHeight) {
-      canvas.width = videoWidth;
-      canvas.height = videoHeight;
+    frameMapRef.current = new Map(frames.map((f) => [f.frame_index, f]));
+    if (frames.length > 0) {
+      const computedDur = frames[frames.length - 1].timestamp_s || frames.length / fps;
+      setDuration((prev) => (prev > 0 ? prev : computedDur));
     }
+  }, [frames, fps]);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const drawFrameCanvas = useCallback(
+    (timeS: number, skeletonFallbackMode: boolean) => {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const lf = frameMap.current.get(frameIndex);
-    if (lf && lf.landmarks.length > 0) {
-      const pts = lf.landmarks;
-      const toX = (x: number) => x * canvas.width;
-      const toY = (y: number) => y * canvas.height;
+      const w = (video && video.videoWidth > 0 ? video.videoWidth : 1280);
+      const h = (video && video.videoHeight > 0 ? video.videoHeight : 720);
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
 
-      // Draw skeleton connections
-      ctx.strokeStyle = 'rgba(224,58,30,0.75)';
-      ctx.lineWidth = 2.5;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      for (const [a, b] of POSE_CONNECTIONS) {
-        const pa = pts[a];
-        const pb = pts[b];
-        if (pa && pb && pa.visibility > 0.4 && pb.visibility > 0.4) {
+      ctx.clearRect(0, 0, w, h);
+
+      if (skeletonFallbackMode) {
+        ctx.fillStyle = '#0A0A0A';
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      if ((!showOverlay && !skeletonFallbackMode) || frames.length === 0) return;
+
+      const frameIdx = Math.min(frames.length - 1, Math.max(0, Math.round(timeS * fps)));
+      const frame = frameMapRef.current.get(frameIdx) ?? frames[frameIdx];
+      if (!frame) return;
+
+      const lms = frame.landmarks;
+      if (lms) {
+        // Vertical midfoot plumb line
+        const lh = lms.LEFT_HEEL;
+        const lt = lms.LEFT_FOOT_INDEX;
+        const rh = lms.RIGHT_HEEL;
+        const rt = lms.RIGHT_FOOT_INDEX;
+
+        let midfootX: number | null = null;
+        if (lh && lt && lh.visibility > 0.35 && lt.visibility > 0.35) {
+          midfootX = ((lh.x + lt.x) / 2) * w;
+        } else if (rh && rt && rh.visibility > 0.35 && rt.visibility > 0.35) {
+          midfootX = ((rh.x + rt.x) / 2) * w;
+        }
+
+        if (midfootX !== null) {
+          ctx.save();
+          ctx.setLineDash([6, 6]);
+          ctx.strokeStyle = 'rgba(204, 255, 0, 0.7)';
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(toX(pa.x), toY(pa.y));
-          ctx.lineTo(toX(pb.x), toY(pb.y));
+          ctx.moveTo(midfootX, h * 0.1);
+          ctx.lineTo(midfootX, h * 0.94);
           ctx.stroke();
+          ctx.restore();
+        }
+
+        // Depth reference line at bottom of rep
+        if (frame.is_bottom) {
+          const lk = lms.LEFT_KNEE;
+          const rk = lms.RIGHT_KNEE;
+          const knee = lk && lk.visibility >= (rk?.visibility ?? 0) ? lk : rk;
+          if (knee && knee.visibility > 0.35) {
+            const ky = knee.y * h;
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = '#A97BFF';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(w * 0.25, ky);
+            ctx.lineTo(w * 0.75, ky);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        // Full skeleton render when in telemetry fallback mode (or if overlay enabled over black background)
+        if (skeletonFallbackMode) {
+          ctx.strokeStyle = '#CCFF00';
+          ctx.lineWidth = 4;
+          ctx.lineCap = 'round';
+          for (const [a, b] of SKELETON_EDGES) {
+            const pa = lms[a];
+            const pb = lms[b];
+            if (pa && pb && pa.visibility > 0.35 && pb.visibility > 0.35) {
+              ctx.beginPath();
+              ctx.moveTo(pa.x * w, pa.y * h);
+              ctx.lineTo(pb.x * w, pb.y * h);
+              ctx.stroke();
+            }
+          }
+          for (const pt of Object.values(lms)) {
+            if (pt.visibility > 0.4) {
+              ctx.beginPath();
+              ctx.arc(pt.x * w, pt.y * h, 5, 0, Math.PI * 2);
+              ctx.fillStyle = '#F4F4EE';
+              ctx.fill();
+            }
+          }
         }
       }
 
-      // Draw landmark dots
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        if (p.visibility > 0.4) {
-          ctx.beginPath();
-          ctx.arc(toX(p.x), toY(p.y), 4, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(255,255,255,0.9)';
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(224,58,30,0.9)';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
+      // Draw trailing bar path when in fallback mode
+      if (skeletonFallbackMode) {
+        const startTrail = Math.max(0, frameIdx - 45);
+        ctx.strokeStyle = 'rgba(240, 64, 184, 0.75)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        let started = false;
+        for (let i = startTrail; i <= frameIdx; i++) {
+          const bf = frames[i]?.bar;
+          if (bf?.tracked) {
+            const px = bf.x * w;
+            const py = bf.y * h;
+            if (!started) {
+              ctx.moveTo(px, py);
+              started = true;
+            } else {
+              ctx.lineTo(px, py);
+            }
+          }
         }
+        ctx.stroke();
       }
-    }
 
-    // Draw bar position dot
-    const bf = barMap.current.get(frameIndex);
-    if (bf && bf.bar_x != null && bf.bar_y != null) {
-      const bx = bf.bar_x * canvas.width;
-      const by = bf.bar_y * canvas.height;
-      ctx.beginPath();
-      ctx.arc(bx, by, 7, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(234,179,8,0.9)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-  }, []);
+      // Live CSRT bar reticle
+      if (frame.bar?.tracked) {
+        const bx = frame.bar.x * w;
+        const by = frame.bar.y * h;
+        ctx.strokeStyle = '#F040B8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(bx, by, 12, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    },
+    [fps, frames, showOverlay],
+  );
 
-  const renderLoop = useCallback(() => {
+  // External seek request
+  useEffect(() => {
+    if (seekTimestamp === null) return;
+    setIsPlaying(false);
+    setCurrentTime(seekTimestamp);
+    if (videoRef.current && !videoDecodeFailed) {
+      videoRef.current.currentTime = seekTimestamp;
+      videoRef.current.pause();
+    }
+    drawFrameCanvas(seekTimestamp, videoDecodeFailed);
+  }, [seekTimestamp, videoDecodeFailed, drawFrameCanvas]);
+
+  // Playback loop for native video overlay or tracked-skeleton fallback player
+  useEffect(() => {
+    let rafId: number;
+    let lastTs = performance.now();
+
+    const loop = (now: number) => {
+      const dt = (now - lastTs) / 1000;
+      lastTs = now;
+
+      if (videoDecodeFailed) {
+        if (isPlaying && duration > 0) {
+          setCurrentTime((prev) => {
+            const next = prev + dt;
+            if (next >= duration) {
+              setIsPlaying(false);
+              drawFrameCanvas(duration, true);
+              return duration;
+            }
+            drawFrameCanvas(next, true);
+            const repMatch = reps.find((r) => next >= r.start_timestamp_s && next <= r.end_timestamp_s);
+            if (repMatch && repMatch.rep_number !== activeRep) {
+              onSelectRep(repMatch.rep_number);
+            }
+            return next;
+          });
+          rafId = requestAnimationFrame(loop);
+        }
+      } else if (isPlaying && videoRef.current) {
+        drawFrameCanvas(videoRef.current.currentTime, false);
+        rafId = requestAnimationFrame(loop);
+      }
+    };
+
+    drawFrameCanvas(currentTime, videoDecodeFailed);
+    if (isPlaying) {
+      rafId = requestAnimationFrame(loop);
+    }
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, videoDecodeFailed, duration, currentTime, drawFrameCanvas, reps, activeRep, onSelectRep]);
+
+  const handleTimeUpdate = () => {
     const video = videoRef.current;
-    if (!video || !frames.length) {
-      rafRef.current = requestAnimationFrame(renderLoop);
+    if (!video || videoDecodeFailed) return;
+    const t = video.currentTime;
+    setCurrentTime(t);
+    drawFrameCanvas(t, false);
+
+    const matchingRep = reps.find((r) => t >= r.start_timestamp_s && t <= r.end_timestamp_s);
+    if (matchingRep && matchingRep.rep_number !== activeRep) {
+      onSelectRep(matchingRep.rep_number);
+    }
+  };
+
+  const togglePlay = () => {
+    if (videoDecodeFailed) {
+      if (currentTime >= duration && duration > 0) setCurrentTime(0);
+      setIsPlaying((p) => !p);
       return;
     }
-    const fps = video.duration ? frames.length / video.duration : 30;
-    const frameIndex = Math.round(video.currentTime * fps);
-
-    if (frameIndex !== lastFrameRef.current) {
-      lastFrameRef.current = frameIndex;
-      drawFrame(frameIndex, video.videoWidth, video.videoHeight);
-    }
-
-    if (onTimeUpdate) onTimeUpdate(video.currentTime);
-    rafRef.current = requestAnimationFrame(renderLoop);
-  }, [frames.length, drawFrame, onTimeUpdate]);
-
-  useEffect(() => {
-    rafRef.current = requestAnimationFrame(renderLoop);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [renderLoop]);
-
-  // Seek to rep when currentRep changes
-  useEffect(() => {
-    if (currentRep == null) return;
-    const boundary = repBoundaries.find(r => r.rep_number === currentRep);
-    if (!boundary || !videoRef.current) return;
     const video = videoRef.current;
-    const fps = video.duration ? frames.length / video.duration : 30;
-    video.currentTime = boundary.start_frame / fps;
-  }, [currentRep, repBoundaries, frames.length]);
+    if (!video) return;
+    if (video.paused) {
+      video.play();
+      setIsPlaying(true);
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  const stepFrames = (delta: number) => {
+    setIsPlaying(false);
+    const maxDur = duration || 0;
+    const next = Math.max(0, Math.min(maxDur, currentTime + delta / fps));
+    setCurrentTime(next);
+    if (videoRef.current && !videoDecodeFailed) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = next;
+    }
+    drawFrameCanvas(next, videoDecodeFailed);
+  };
+
+  const jumpToRep = (repNum: number) => {
+    onSelectRep(repNum);
+    const rep = reps.find((r) => r.rep_number === repNum);
+    if (rep) {
+      setIsPlaying(false);
+      setCurrentTime(rep.start_timestamp_s);
+      if (videoRef.current && !videoDecodeFailed) {
+        videoRef.current.currentTime = rep.start_timestamp_s;
+      }
+      drawFrameCanvas(rep.start_timestamp_s, videoDecodeFailed);
+    }
+  };
 
   return (
-    <div className={`video-wrapper rounded-xl overflow-hidden bg-black ${className}`}>
-      <video
-        ref={videoRef}
-        src={videoUrl}
-        controls
-        playsInline
-        className="w-full block"
-        aria-label="Annotated squat analysis video"
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 w-full h-full"
-        aria-hidden="true"
-      />
+    <div className="space-y-3">
+      <div className="relative border border-[var(--hairline)] bg-[#0A0A0A] overflow-hidden aspect-video">
+        {!videoDecodeFailed && (
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full object-contain block"
+            playsInline
+            onError={() => setVideoDecodeFailed(true)}
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                drawFrameCanvas(videoRef.current.currentTime, false);
+              }
+            }}
+            onEnded={() => setIsPlaying(false)}
+            aria-label="Annotated squat analysis video"
+          />
+        )}
+
+        <canvas
+          ref={canvasRef}
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full pointer-events-none"
+        />
+
+        {activeRep !== null && (
+          <div className="absolute top-3 left-3 px-2 py-1 bg-[#CCFF00] text-[#0A0A0A] font-pixel text-[10px] font-bold uppercase">
+            Rep {activeRep}
+          </div>
+        )}
+
+        {frames.length > 0 && !videoDecodeFailed && (
+          <button
+            type="button"
+            onClick={() => setShowOverlay((v) => !v)}
+            className="absolute top-3 right-3 px-2 py-1 bg-[#0A0A0A]/85 border border-[var(--hairline)] hover:border-[#CCFF00] text-[var(--text)] font-pixel text-[9px] uppercase flex items-center gap-1.5"
+            aria-pressed={showOverlay}
+          >
+            <Layers size={12} className="text-[#CCFF00]" />
+            <span>Plumb overlay: {showOverlay ? 'On' : 'Off'}</span>
+          </button>
+        )}
+
+        {videoDecodeFailed && (
+          <div className="absolute bottom-2 left-3 right-3 px-2 py-1 bg-[#0A0A0A]/90 border border-[var(--hairline)] type-mono text-[10px] text-[var(--text)]/75">
+            Browser cannot decode server MPEG-4 codec directly. Playing real tracked pose &amp; bar overlay ({frames.length} frames); use Annotated MP4 to download file.
+          </div>
+        )}
+      </div>
+
+      {/* Scrubber */}
+      <div className="relative pt-3">
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.01}
+          value={currentTime}
+          aria-label="Seek video timeline"
+          onChange={(e) => {
+            const val = parseFloat(e.target.value);
+            setIsPlaying(false);
+            setCurrentTime(val);
+            if (videoRef.current && !videoDecodeFailed) videoRef.current.currentTime = val;
+            drawFrameCanvas(val, videoDecodeFailed);
+          }}
+          className="w-full h-1.5 bg-[#1E1E1E] accent-[#CCFF00] cursor-pointer"
+        />
+
+        {duration > 0 &&
+          reps.map((r) => (
+            <button
+              key={r.rep_number}
+              type="button"
+              onClick={() => jumpToRep(r.rep_number)}
+              className="absolute top-0 -translate-x-1/2 font-pixel text-[9px] text-[#F040B8] hover:text-[#CCFF00]"
+              style={{ left: `${(r.start_timestamp_s / duration) * 100}%` }}
+              title={`Jump to rep ${r.rep_number}`}
+            >
+              R{r.rep_number}
+            </button>
+          ))}
+      </div>
+
+      {/* Transport + Rep Selection */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Button variant="primary" size="sm" onClick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
+            {isPlaying ? <Pause size={14} /> : <Play size={14} fill="#0A0A0A" />}
+            <span>{isPlaying ? 'Pause' : 'Play'}</span>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => stepFrames(-1)} title="Previous frame" aria-label="Previous frame">
+            <SkipBack size={14} />
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => stepFrames(1)} title="Next frame" aria-label="Next frame">
+            <SkipForward size={14} />
+          </Button>
+          <span className="type-mono text-[var(--text)]/70 ml-1">
+            {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onSelectRep(null)}
+            className={`px-2 py-1 font-pixel text-[10px] border transition-colors ${
+              activeRep === null
+                ? 'border-[#CCFF00] bg-[#CCFF00] text-[#0A0A0A] font-bold'
+                : 'border-[var(--hairline)] text-[var(--text)]/70 hover:text-[var(--text)]'
+            }`}
+          >
+            All
+          </button>
+          {reps.map((r) => (
+            <button
+              key={r.rep_number}
+              type="button"
+              onClick={() => jumpToRep(r.rep_number)}
+              className={`px-2 py-1 font-pixel text-[10px] border transition-colors ${
+                activeRep === r.rep_number
+                  ? 'border-[#CCFF00] bg-[#CCFF00] text-[#0A0A0A] font-bold'
+                  : 'border-[var(--hairline)] text-[var(--text)]/70 hover:text-[var(--text)]'
+              }`}
+            >
+              R{r.rep_number}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -14,11 +14,10 @@ venv/
 .venv/
 .pytest_cache/
 
-# MediaPipe model & large test videos (sample downloaded separately)
+# MediaPipe model is included/downloaded in Docker; keep large test videos excluded
 backend/tests/sample_squat.mp4
 backend/tests/sample_squat.*.mp4
 backend/tests/sample_squat.*.webm
-backend/app/pipeline/pose_landmarker_full.task
 
 # Temp outputs
 tmp/
@@ -30,6 +29,12 @@ frontend/dist/
 frontend/dist-ssr/
 *.local
 
+# Secrets & Environment
+.env
+.env.*
+!.env.example
+
 # OS files
 .DS_Store
 Thumbs.db
+

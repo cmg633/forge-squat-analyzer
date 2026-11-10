@@ -1,25 +1,24 @@
+import React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { Camera, Clock, Info, Zap } from 'lucide-react';
+import { Camera, Activity, Clock, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { FooterCredit } from './FooterCredit';
 
 const NAV_ITEMS = [
-  { to: '/',        icon: Camera, label: 'Analyze' },
-  { to: '/history', icon: Clock,  label: 'History'  },
-  { to: '/about',   icon: Info,   label: 'About'    },
+  { to: '/', icon: Camera, label: 'Analyze', end: true },
+  { to: '/results', icon: Activity, label: 'Results', end: false },
+  { to: '/history', icon: Clock, label: 'History', end: false },
+  { to: '/about', icon: Info, label: 'About', end: false },
 ];
 
 function ForgeLogo() {
   return (
-    <NavLink to="/" className="flex items-center gap-2 group select-none">
-      <div className="relative">
-        <Zap
-          size={22}
-          className="text-forge-red drop-shadow-[0_0_6px_rgba(224,58,30,0.7)] transition-transform group-hover:scale-110"
-          fill="currentColor"
-        />
+    <NavLink to="/" className="flex items-center gap-3 select-none">
+      <div className="w-6 h-6 bg-[#CCFF00] border border-[#CCFF00] flex items-center justify-center font-pixel text-xs font-bold text-[#0A0A0A]">
+        F
       </div>
-      <span className="display-heading text-xl text-white tracking-tight">
-        FORGE<span className="text-forge-red">.</span>AI
+      <span className="font-display font-black text-xl tracking-tight leading-none text-[var(--text)]">
+        FORGE<span className="text-[#CCFF00]">.</span>
       </span>
     </NavLink>
   );
@@ -29,75 +28,82 @@ export default function Layout() {
   const location = useLocation();
 
   return (
-    <div className="flex flex-col min-h-dvh bg-forge-bg">
-      {/* ── Desktop top nav ── */}
-      <header className="hidden md:flex items-center justify-between px-6 py-4 border-b border-forge-border bg-forge-bg/90 backdrop-blur-md sticky top-0 z-40">
-        <ForgeLogo />
-        <nav className="flex items-center gap-1">
-          {NAV_ITEMS.map(({ to, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                `px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  isActive
-                    ? 'bg-forge-red/10 text-forge-red border border-forge-red/20'
-                    : 'text-forge-grey hover:text-white hover:bg-forge-surface'
-                }`
-              }
-            >
-              {label}
-            </NavLink>
-          ))}
-        </nav>
+    <div className="flex flex-col min-h-dvh bg-[var(--bg)] text-[var(--text)]">
+      <div className="grain-overlay" aria-hidden="true" />
+
+      {/* Top Navigation */}
+      <header className="border-b border-[var(--hairline)] bg-[var(--bg)]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 h-16 flex items-center justify-between gap-4">
+          <ForgeLogo />
+
+          <nav aria-label="Main navigation" className="hidden md:flex items-center gap-2">
+            {NAV_ITEMS.map(({ to, label, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) => {
+                  const active =
+                    isActive ||
+                    (to === '/' && location.pathname === '/analyze') ||
+                    (to === '/results' && location.pathname.startsWith('/results'));
+                  return `px-3 py-1.5 font-pixel text-[11px] uppercase tracking-wider border transition-colors duration-150 ${
+                    active
+                      ? 'border-[#CCFF00] bg-[#CCFF00] text-[#0A0A0A] font-bold'
+                      : 'border-transparent text-[var(--text)]/75 hover:text-[#CCFF00] hover:border-[var(--hairline)]'
+                  }`;
+                }}
+              >
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
       </header>
 
-      {/* ── Page content ── */}
-      <main className="flex-1 pb-safe md:pb-0">
+      {/* Main Route Content */}
+      <main className="flex-1 pb-16 md:pb-0">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={location.pathname}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            className="min-h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
           >
             <Outlet />
           </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* ── Mobile bottom tab bar ── */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-forge-surface/95 backdrop-blur-lg border-t border-forge-border bottom-tab-bar">
-        <div className="flex">
-          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+      {/* Single Consistent Footer Across All Routes */}
+      <FooterCredit />
+
+      {/* Mobile Bottom Tab Bar (4 items) */}
+      <nav
+        aria-label="Mobile navigation"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[var(--bg)]/95 backdrop-blur-md border-t border-[var(--hairline)] pb-safe"
+      >
+        <div className="grid grid-cols-4">
+          {NAV_ITEMS.map(({ to, icon: Icon, label, end }) => (
             <NavLink
               key={to}
               to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                `flex-1 flex flex-col items-center justify-center gap-0.5 py-3 min-h-[52px] transition-colors duration-200 ${
-                  isActive ? 'text-forge-red' : 'text-forge-grey'
-                }`
-              }
+              end={end}
+              className={({ isActive }) => {
+                const active =
+                  isActive ||
+                  (to === '/' && location.pathname === '/analyze') ||
+                  (to === '/results' && location.pathname.startsWith('/results'));
+                return `flex flex-col items-center justify-center py-2 min-h-[56px] font-pixel text-[9px] uppercase transition-colors ${
+                  active
+                    ? 'text-[#CCFF00] bg-[#CCFF00]/10 border-t-2 border-[#CCFF00]'
+                    : 'text-[var(--text)]/60 hover:text-[var(--text)]'
+                }`;
+              }}
             >
-              {({ isActive }) => (
-                <>
-                  <div className="relative">
-                    <Icon size={22} strokeWidth={isActive ? 2.5 : 1.8} />
-                    {isActive && (
-                      <motion.div
-                        layoutId="tab-indicator"
-                        className="absolute -inset-1.5 bg-forge-red/10 rounded-lg -z-10"
-                        transition={{ type: 'spring', bounce: 0.2, duration: 0.4 }}
-                      />
-                    )}
-                  </div>
-                  <span className="text-[10px] font-semibold tracking-wide">{label}</span>
-                </>
-              )}
+              <Icon size={18} />
+              <span className="mt-1">{label}</span>
             </NavLink>
           ))}
         </div>

@@ -118,6 +118,30 @@ def render_annotated_video(
     cap.release()
     writer.release()
 
+    # Re-encode to browser-compatible H.264 + faststart when ffmpeg is available (e.g. Docker/HF Space)
+    import shutil
+    import subprocess
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        h264_tmp = str(Path(output_path).with_suffix(".h264.mp4"))
+        try:
+            subprocess.run(
+                [
+                    ffmpeg_bin, "-y", "-i", output_path,
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", h264_tmp,
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=120,
+            )
+            Path(h264_tmp).replace(output_path)
+            logger.info(f"Transcoded {output_path} to H.264 faststart")
+        except Exception as exc:
+            logger.warning(f"ffmpeg H.264 transcode skipped ({exc}); serving raw OpenCV MP4")
+            Path(h264_tmp).unlink(missing_ok=True)
+
     logger.info(f"Annotated video written to {output_path} ({frame_idx} frames)")
     return output_path
 

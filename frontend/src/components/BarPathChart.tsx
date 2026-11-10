@@ -9,99 +9,92 @@ import {
   ReferenceLine,
 } from 'recharts';
 
+interface BarPathFrameItem {
+  frame_index: number;
+  timestamp_s: number;
+  bar?: { x: number; y: number; confidence: number; tracked: boolean } | null;
+  rep_number?: number | null;
+}
+
 interface BarPathChartProps {
   framesData?: {
-    frames: Array<{
-      frame_index: number;
-      timestamp_s: number;
-      bar?: { x: number; y: number; confidence: number; tracked: boolean };
-      rep_number?: number;
-    }>;
-  };
-  activeRep?: number;
+    frames: BarPathFrameItem[];
+  } | null;
+  activeRep?: number | null;
 }
 
 export const BarPathChart: React.FC<BarPathChartProps> = ({ framesData, activeRep }) => {
   if (!framesData?.frames || framesData.frames.length === 0) {
     return (
-      <div className="h-48 flex items-center justify-center text-forge-grey text-sm">
-        No bar tracking data available
+      <div className="h-44 flex items-center justify-center type-small text-[var(--text)]/60 border border-dashed border-[var(--hairline)]">
+        No bar tracking data available.
       </div>
     );
   }
 
-  // Filter for active rep if specified
   const filteredFrames = activeRep
     ? framesData.frames.filter((f) => f.rep_number === activeRep && f.bar?.tracked)
     : framesData.frames.filter((f) => f.bar?.tracked);
 
   if (filteredFrames.length === 0) {
     return (
-      <div className="h-48 flex items-center justify-center text-forge-grey text-sm">
-        Bar was not tracked in this rep
+      <div className="h-44 flex items-center justify-center type-small text-[var(--text)]/60 border border-dashed border-[var(--hairline)]">
+        {activeRep ? `Bar was not continuously tracked during rep ${activeRep}.` : 'Bar tracker lost lock across clip.'}
       </div>
     );
   }
 
-  // Compute baseline x (median of tracked points) to show deviation
-  const xs = filteredFrames.map((f) => f.bar!.x);
-  const medianX = xs.slice().sort()[Math.floor(xs.length / 2)];
+  const xs = filteredFrames.map((f) => f.bar!.x).sort((a, b) => a - b);
+  const medianX = xs[Math.floor(xs.length / 2)];
 
   const chartData = filteredFrames.map((f) => ({
-    frame: f.frame_index,
     time: f.timestamp_s.toFixed(2),
-    // Horizontal drift from median, in percentage of frame width
     horizontalDrift: +((f.bar!.x - medianX) * 100).toFixed(2),
-    // Vertical position (inverted so higher in squat = higher on chart)
-    verticalPos: +((1 - f.bar!.y) * 100).toFixed(1),
   }));
 
   return (
-    <div className="w-full">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs uppercase tracking-eyebrow text-forge-grey font-display">
-          Bar Horizontal Drift (% frame width)
-        </span>
-        <span className="text-xs text-forge-grey">
-          Baseline median x: {(medianX * 100).toFixed(1)}%
-        </span>
+    <div className="w-full space-y-2">
+      <div className="flex items-center justify-between type-mono text-[var(--text)]/65">
+        <span>Horizontal bar offset vs median X</span>
+        <span>Median X: {(medianX * 100).toFixed(1)}%</span>
       </div>
       <ResponsiveContainer width="100%" height={160}>
-        <LineChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: -20 }}>
+        <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: -18 }}>
           <XAxis
             dataKey="time"
-            tick={{ fill: '#888', fontSize: 10 }}
-            tickLine={{ stroke: '#333' }}
-            axisLine={{ stroke: '#333' }}
+            tick={{ fill: '#8A8A8A', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+            tickLine={{ stroke: 'rgba(255,255,255,0.12)' }}
+            axisLine={{ stroke: 'rgba(255,255,255,0.12)' }}
             unit="s"
           />
           <YAxis
-            tick={{ fill: '#888', fontSize: 10 }}
-            tickLine={{ stroke: '#333' }}
-            axisLine={{ stroke: '#333' }}
+            tick={{ fill: '#8A8A8A', fontSize: 10, fontFamily: 'JetBrains Mono' }}
+            tickLine={{ stroke: 'rgba(255,255,255,0.12)' }}
+            axisLine={{ stroke: 'rgba(255,255,255,0.12)' }}
             unit="%"
             domain={['auto', 'auto']}
           />
           <Tooltip
             contentStyle={{
-              backgroundColor: '#161616',
-              border: '1px solid #333',
-              borderRadius: 6,
-              fontSize: 12,
+              backgroundColor: '#0A0A0A',
+              border: '1px solid #CCFF00',
+              fontFamily: 'JetBrains Mono',
+              fontSize: '11px',
+              padding: '6px 10px',
             }}
-            labelStyle={{ color: '#aaa' }}
-            itemStyle={{ color: '#E03A1E' }}
-            formatter={(val: any) => [`${val}%`, 'Drift']}
+            labelStyle={{ color: '#CCFF00', fontWeight: 'bold' }}
+            itemStyle={{ color: '#F4F4EE' }}
+            formatter={(val: number) => [`${val > 0 ? '+' : ''}${val}%`, 'Horizontal drift']}
             labelFormatter={(label) => `Time: ${label}s`}
           />
-          <ReferenceLine y={0} stroke="#444" strokeDasharray="3 3" />
+          <ReferenceLine y={0} stroke="#A97BFF" strokeDasharray="3 3" strokeWidth={1.5} />
           <Line
             type="monotone"
             dataKey="horizontalDrift"
-            stroke="#E03A1E"
+            stroke="#CCFF00"
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: '#E03A1E' }}
+            activeDot={{ r: 4, fill: '#F040B8', stroke: '#F4F4EE' }}
           />
         </LineChart>
       </ResponsiveContainer>

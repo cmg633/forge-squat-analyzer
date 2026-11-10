@@ -108,7 +108,7 @@ def _gemini_coaching(findings: List[dict], per_rep_metrics: Dict, api_key: str) 
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.3, "maxOutputTokens": 800},
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode(),

@@ -28,3 +28,4 @@ if ($VercelToken) {
 
 Write-Host "`nFrontend successfully deployed to Vercel!" -ForegroundColor Green
 cd ..
+

@@ -6,17 +6,29 @@
 
 <p align="center">
   <strong>Production-grade, evidence-grounded computer-vision app for barbell squat kinematics.</strong><br>
-  Built with MediaPipe, OpenCV CSRT, SciPy, FastAPI, React 18, Tailwind CSS, and Framer Motion.
+  Built with MediaPipe, OpenCV CSRT, SciPy, FastAPI, React 18, Tailwind CSS, Framer Motion, and Lenis.
 </p>
 
 <p align="center">
   <a href="#quickstart">Quickstart</a> •
+  <a href="#neo-brutalist-design-system">Design System</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#evidence--verification">Evidence & Verification</a> •
   <a href="#skill-specification">Skill Specification</a> •
-  <a href="#deployment">Deployment</a> •
   <a href="#documentation">Documentation</a>
 </p>
+
+---
+
+## Visual Previews (Neo-Brutalist Design System)
+
+| Landing Hero & Illustrative Demo | Design System Showcase (`/design`) |
+| :---: | :---: |
+| ![Landing Page](docs/screenshots/landing_page_neo_brutalist.png) | ![Design System](docs/screenshots/design_system_neo_brutalist.png) |
+
+| Real Video Kinematic Results (`/results/:id`) | Kinetic Footer Credit (`@Chiranth MG`) |
+| :---: | :---: |
+| ![Results Page](docs/screenshots/results_page_neo_brutalist.png) | ![Footer Credit](docs/screenshots/footer_credit_desktop.png) |
 
 ---
 
@@ -32,14 +44,32 @@ Unlike black-box fitness apps that invent ungrounded scores or hallucinate preci
 
 ---
 
-## Visual Design Language
+## Neo-Brutalist Design System (Pixel-Grid x Kinetic Type)
 
-Crafted around high-contrast athletic performance:
-- **Base Canvas:** Deep obsidian near-black (`#0B0B0B`) with subtle background grain.
-- **Accent Signal:** High-energy signal red (`#E03A1E`) with radiant drop-shadow glows.
-- **Typography:** Ultra-bold uppercase display headlines (`Barlow Condensed`) and clean technical body type (`Inter`).
-- **Surface Cards:** Glassmorphic translucent cards (`#161616` with 1px hairline borders and `backdrop-blur`).
-- **Eyebrow Badges:** Tracked-out uppercase micro-labels (`letter-spacing: 0.2em`).
+- **Color Tokens:**
+  - Acid Lime: `#CCFF00`
+  - Signal Yellow: `#F5FF00`
+  - Hot Magenta: `#F040B8`
+  - Violet: `#A97BFF`
+  - Ink: `#0A0A0A`
+  - Paper: `#F4F4EE`
+- **Typography:**
+  - Display: `Archivo` 900 heavy grotesk with Roman/Italic mixing (fluid `clamp()` sizes up to ~18vw).
+  - Pixel Accent: `Silkscreen` for badges, tags, and micro numbers.
+  - Mono: `JetBrains Mono` for live kinematic metrics and timestamps.
+- **Components (`/frontend/src/ui`):**
+  - `SelectionBox`: Figma-style dashed border with 4 solid square corner handles and eyebrow label chips.
+  - `PixelTile`: 12-col bento grid tile with 1px hairline border, subtle spring 3D tilt, and pixel-stair corners.
+  - `TagChip`: 1px outline pixel tag chips with drag support.
+  - `DotMatrix`: SVG dot pattern clusters with cursor-reactive illumination.
+  - `MarqueeTicker`: Infinite pixel-font criteria marquee ticker reacting to scroll velocity.
+  - `KineticHeading`: Giant kinetic typography with per-character stagger and roman/italic word swapping.
+  - `CursorLabel`: Neon pointer arrow with reactive hover label pill ("UPLOAD", "PLAY", "JUMP TO FRAME") and corner coordinates readout.
+  - `IllustrativeSquatDemo`: Stick-figure squat loop with real-time calculated angles, patellar horizon, and joint angle tooltips.
+- **Easter Egg:**
+  - Konami code listener (`↑↑↓↓←→←→BA`) toggles inverted palette and visual pixel rain.
+
+Explore the complete component library at the live `/design` route!
 
 ---
 
@@ -52,7 +82,7 @@ flowchart TD
     subgraph Pipeline ["Kinematic Analysis Pipeline"]
         B --> C["1. Ingest & Normalize\n(OpenCV rotation, resolution & FPS normalization)"]
         C --> D["2. Quality Gate\n(Side-view lateral spread, body framing, steadiness)"]
-        D --> E["3. Pose Estimation\n(MediaPipe 33 Landmarks + Savitzky-Golay Smoothing)"]
+        D --> E["3. Pose Estimation\n(MediaPipe 33 Landmarks + Savitzky-Golay / One-Euro Smoothing)"]
         E --> F["4. Barbell Tracking\n(OpenCV CSRT continuous tracker + lost-frame detection)"]
         E --> G["5. Rep Detection\n(SciPy find_peaks on hip-Y descent kinetics)"]
         F & G --> H["6. Per-Rep Kinematic Metrics\n(Depth proxy, back angle, knee flexion, hip drive, bar drift)"]
@@ -67,140 +97,45 @@ flowchart TD
 
 ---
 
-## Pipeline Stages
+## Quickstart (One-Click)
 
-1. **Ingest:** Validates format (MP4/MOV/WebM), duration (≤60s), and file size (≤100MB). Normalizes resolution and frame rate via OpenCV.
-2. **Quality Gate:** Evaluates whether camera angle is a sagittal side view (by measuring normalized shoulder/hip x-spread). Rejects front-view recordings or heavy camera instability with readable failure reasons.
-3. **Pose Estimation:** MediaPipe Pose extracts 33 body keypoints per frame. Jitter is eliminated via a Savitzky-Golay temporal smoothing filter.
-4. **Bar Tracking:** OpenCV CSRT tracker initializes at the shoulder shelf and tracks the barbell trajectory, flagging tracking loss if occlusion occurs.
-5. **Rep Detection:** `scipy.signal.find_peaks` analyzes vertical hip displacement to isolate rep start, deepest descent (bottom), and standing lockout.
-6. **Kinematic Metrics:** Calculates depth delta (hip crease vs patellar proxy), bottom torso angle, knee flexion, ascending hip drive rate, and horizontal bar path variance.
-7. **Skill Engine:** Deterministic rule engine evaluates metrics against `skill/squat_skill.yaml`.
-8. **Coaching Agent:** Pydantic-validated LLM generates actionable cueing without modifying verdicts.
-9. **Video Rendering:** OpenCV draws bone vectors and a 60-frame bar path trail to render an annotated MP4.
+### Automated Windows Launcher:
+Double-click `start.bat` in the root folder! It launches both the FastAPI backend and the Vite frontend in dedicated terminal windows and automatically opens `http://localhost:5173`.
 
----
-
-## Quickstart (Local Development)
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- npm or pnpm
-
-### 1. Clone & Set Up Environment
+### Manual Startup:
 ```bash
-git clone https://github.com/your-repo/forge-squat.git
-cd forge-squat
-cp .env.example .env
-```
+# Terminal 1 - Backend:
+set PYTHONPATH=backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 7860
 
-### 2. Launch Backend
-```bash
-cd backend
-pip install -r requirements.txt
-python -m uvicorn app.main:app --host 0.0.0.0 --port 7860 --reload
-```
-*Backend runs at `http://localhost:7860` with interactive API docs at `http://localhost:7860/docs`.*
-
-### 3. Launch Frontend (PWA)
-```bash
+# Terminal 2 - Frontend:
 cd frontend
-npm install
-npm run dev
+npx vite --host --port 5173
 ```
-*Frontend runs at `http://localhost:5173`.*
 
 ---
 
-## Docker Compose Launch
+## Verification & Test Suite
 
-Run the entire full-stack application with a single command:
-
+Run the full end-to-end automated verification script:
 ```bash
-docker compose up --build
+python backend/tests/verify_and_generate_evidence.py
 ```
-- Frontend: `http://localhost:5173`
-- Backend: `http://localhost:7860`
-- API Health Check: `http://localhost:7860/health`
+- Tests real side-view barbell squat video (`common_sample_squat.mp4` / `squat_clip_15s.mp4`)
+- Validates 5 detected reps with exact start, bottom, and lockout frames
+- Tests quality-gate rejection on front-view video (`hard_front_view.mp4`)
+- Tests hot-reloading of `skill/squat_skill.yaml` without application restart.
 
----
-
-## Evidence & Verification
-
-All mandatory verification steps have been executed and documented:
-
-| Verification Task | Method | Result | Evidence |
-|:------------------|:-------|:------:|:---------|
-| **Unit Test Suite** | `pytest backend/tests/test_pipeline.py` | **27/27 PASSED** | Unit tests for angle geometry, depth logic, rep detection, cannot-assess paths |
-| **Real Video Pipeline** | Run on 779-frame common sample | **5 REPS DETECTED** | Metrics table (depth, torso angle, knee angle) in [`docs/EVIDENCE.md`](docs/EVIDENCE.md) |
-| **Visual Frame Audit** | Extract standing, bottom, and lockout | **CONFIRMED** | Extracted PNG frames inspected in [`docs/evidence_frames/`](docs/evidence_frames/) |
-| **Hard Video Test** | Front-view video quality gate | **REJECTED** | Correctly fails side-view test (`avg_spread: 0.35 > 0.25`) |
-| **YAML Hot-Reload** | Live threshold edit | **VERIFIED** | Relaxing angle tolerance flipped verdict from Fail to Pass with 0 code changes |
-| **Frontend Production Build** | `tsc && vite build` | **COMPILED (7.75s)** | PWA manifest, service worker, and vendor chunks generated |
-
-Read the full report in [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
-
----
-
-## Skill Specification (`skill/squat_skill.yaml`)
-
-The criteria in `squat_skill.yaml` are mapped directly to reference pages 1–35:
-
-| Criterion ID | Title | Page & Section | Side-View Assessable? | Logic Summary |
-|:-------------|:------|:--------------:|:---------------------:|:--------------|
-| `DEPTH_HIP_CREASE` | Hip crease below top of patella | p. 7, Fig 2-1 | **Yes** | Hip-Y > Knee-Y at bottom frame |
-| `BACK_ANGLE_BOTTOM` | Back angle ~45° from horizontal | p. 13, Fig 2-13 | **Yes** | 35°–55° range (±10° assumption noted) |
-| `BAR_OVER_MIDFOOT` | Bar remains over midfoot | p. 10, Fig 2-7 | **Yes** | Bar-X vs Midfoot-X within tolerance |
-| `HIP_DRIVE` | Hips rise first ("up, not forward") | p. 18, Text | **Yes** | Hip vertical rise rate > shoulder rate |
-| `EYE_GAZE` | Eyes down, 4-5 ft ahead on floor | p. 20, Text | **Yes** | Nose-to-ear angle proxy (estimate) |
-| `BAR_POSITION_BACK` | Bar below scapular spine | p. 24, Fig 2-19 | **No** | Requires rear or combined angle |
-| `STANCE_WIDTH` | Heels shoulder-width apart | p. 6, Text | **No** | Feet overlap in sagittal view |
-| `TOE_ANGLE` | Toes turned out ~30° | p. 6, Text | **No** | Angle flattened in 2D side view |
-| `KNEE_TRACKING` | Knees track over toes (no caving) | p. 8, Text | **No** | Valgus collapse occurs along medial axis |
-| `GRIP` | Hands just outside shoulders | p. 23, Text | **No** | Requires frontal/posterior view |
-
----
-
-## Deployment Guide
-
-### Deploying Backend to Hugging Face Spaces (Docker SDK)
-
-1. Create a Space on [Hugging Face](https://huggingface.co/spaces) with **Docker SDK** on port `7860`.
-2. Push repository:
+All 27 pipeline unit tests:
 ```bash
-git remote add hf https://huggingface.co/spaces/YOUR_USERNAME/forge-squat-backend
-git push hf main
+$env:PYTHONPATH="backend"
+pytest backend/tests/test_pipeline.py -v
 ```
-3. Set Space Environment Variables / Secrets:
-   - `FRONTEND_URL`: URL of your deployed Vercel frontend.
-   - `GEMINI_API_KEY`: (Optional) Free-tier Google Gemini key for LLM coaching text.
-
-### Deploying Frontend to Vercel
-
-1. Install Vercel CLI:
-```bash
-npm install -g vercel
-```
-2. Deploy frontend with production backend URL:
-```bash
-cd frontend
-VITE_API_URL=https://YOUR_HF_SPACE_URL.hf.space vercel --prod
-```
-3. Configure `VITE_API_URL` in the Vercel project dashboard.
 
 ---
 
-## Documentation Index
-
-- [`docs/BUILD_NOTE.md`](docs/BUILD_NOTE.md): Architecture diagrams, design trade-offs, model choices, and build cost telemetry ($0 target).
-- [`docs/EVIDENCE.md`](docs/EVIDENCE.md): Detailed verification evidence, metrics tables, quality gate proof, and visual overlay audits.
-- [`docs/AI_USAGE.md`](docs/AI_USAGE.md): Audit of AI assistance, code inspection findings, and real bug catch-and-fix log.
-- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md): 15-minute product walkthrough (5 min pitch, 10 min live demo) and investor/coach objections handler.
-
----
-
-## License
-
-MIT License. Designed with scientific integrity for lifters and coaches worldwide.
-
+## Documentation
+- [`docs/BUILD_NOTE.md`](docs/BUILD_NOTE.md): Architecture decisions, design token migration, trade-offs, and verification logs.
+- [`docs/EVIDENCE.md`](docs/EVIDENCE.md): Visual proof, frame extracts, and criteria alignment.
+- [`docs/AI_USAGE.md`](docs/AI_USAGE.md): Scoped AI coaching architecture and prompt engineering.
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md): Step-by-step walkthrough for evaluating the live system.

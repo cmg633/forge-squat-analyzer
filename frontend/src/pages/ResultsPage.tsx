@@ -1,66 +1,147 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  SkipBack,
-  SkipForward,
   Download,
   Share2,
-  CheckCircle2,
-  XCircle,
-  HelpCircle,
   AlertTriangle,
-  BookOpen,
-  Info,
-  ChevronRight,
-  Sparkles,
-  BarChart3,
-  Layers,
   ArrowLeft,
-  ChevronDown,
-  ChevronUp,
+  XCircle,
+  BookOpen,
 } from 'lucide-react';
-
 import { getResults, getFrames, getVideoUrl } from '../api/client';
+import { getAllHistory } from '../utils/db';
+import VideoPlayer from '../components/VideoPlayer';
 import { BarPathChart } from '../components/BarPathChart';
 import { QualityBadge } from '../components/QualityBadge';
-import SkeletonLoader from '../components/SkeletonLoader';
-import type { Finding } from '../types/analysis';
+import FindingCard from '../components/FindingCard';
+import { SelectionBox } from '../ui/SelectionBox';
+import { PixelTile } from '../ui/PixelTile';
+import { TagChip } from '../ui/TagChip';
+import { Button, ButtonLink } from '../ui/Button';
+import type { AnalysisResult, Finding, Metric } from '../types/analysis';
+
+interface MetricCardDef {
+  key: string;
+  label: string;
+  target: string;
+  hasAssumption: boolean;
+  formatVal: (val: number | null, unit: string) => string;
+}
+
+function shortUnit(unit?: string): string {
+  if (!unit) return '';
+  const u = unit.toLowerCase();
+  if (u.startsWith('pixel')) return 'px';
+  if (u.startsWith('degree')) return '°';
+  return '';
+}
+
+const REP_METRIC_DEFS: MetricCardDef[] = [
+  {
+    key: 'depth_hip_vs_knee',
+    label: 'Depth proxy',
+    target: 'Fig 2-1 (crease vs knee)',
+    hasAssumption: true,
+    formatVal: (v, u) => (v === null ? '—' : `${v > 0 ? '+' : ''}${v} ${shortUnit(u) || 'px'}`),
+  },
+  {
+    key: 'back_angle_bottom',
+    label: 'Back angle',
+    target: '~45° (±10° assumption)',
+    hasAssumption: true,
+    formatVal: (v) => (v === null ? '—' : `${v}°`),
+  },
+  {
+    key: 'knee_angle_bottom',
+    label: 'Knee flexion',
+    target: 'Bottom inflection',
+    hasAssumption: false,
+    formatVal: (v) => (v === null ? '—' : `${v}°`),
+  },
+  {
+    key: 'hip_drive',
+    label: 'Hip drive',
+    target: 'p. 18 (hips rise first)',
+    hasAssumption: false,
+    formatVal: (v) => (v === null ? '—' : v > 0.5 ? 'Hips lead' : 'Chest leads'),
+  },
+  {
+    key: 'eye_gaze',
+    label: 'Eye gaze',
+    target: 'p. 20 (proxy)',
+    hasAssumption: true,
+    formatVal: (v) => (v === null ? '—' : `${v}°`),
+  },
+  {
+    key: 'bar_midfoot_offset',
+    label: 'Midfoot offset',
+    target: '40px max assumption',
+    hasAssumption: true,
+    formatVal: (v) => (v === null ? '—' : `${v} px`),
+  },
+  {
+    key: 'bar_path_std',
+    label: 'Path std dev',
+    target: '25px σ assumption',
+    hasAssumption: true,
+    formatVal: (v) => (v === null ? '—' : `${v} px`),
+  },
+];
 
 export default function ResultsPage() {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
+  const [emptyHistory, setEmptyHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
   const [framesData, setFramesData] = useState<any>(null);
 
-  // Video playback state
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [activeRep, setActiveRep] = useState<number | null>(null);
-  const [filterResult, setFilterResult] = useState<string>('all');
-  const [selectedCitation, setSelectedCitation] = useState<any | null>(null);
+  const [seekTimestamp, setSeekTimestamp] = useState<number | null>(null);
+  const [activeFindingIdx, setActiveFindingIdx] = useState<number | null>(null);
+  const [filterResult, setFilterResult] = useState<'all' | 'meets' | 'fails' | 'cannot'>('all');
+  const [selectedCitation, setSelectedCitation] = useState<Finding | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Fetch results and frames
+  // If user opens /results directly without jobId, route to latest saved result or show empty state
+  useEffect(() => {
+    if (jobId) return;
+    let mounted = true;
+    setLoading(true);
+    setEmptyHistory(false);
+
+    getAllHistory()
+      .then((entries) => {
+        if (!mounted) return;
+        if (entries.length > 0) {
+          navigate(`/results/${entries[0].job_id}`, { replace: true });
+        } else {
+          setEmptyHistory(true);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setEmptyHistory(true);
+        setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [jobId, navigate]);
+
   useEffect(() => {
     if (!jobId) return;
-
     let isMounted = true;
     setLoading(true);
+    setEmptyHistory(false);
     setError(null);
 
     Promise.all([
-      getResults(jobId).catch((err) => {
-        throw new Error(`Failed to load analysis results: ${err.message}`);
-      }),
+      getResults(jobId),
       getFrames(jobId).catch(() => null),
     ])
       .then(([resData, fData]) => {
@@ -69,12 +150,15 @@ export default function ResultsPage() {
         setFramesData(fData);
         if (resData.reps && resData.reps.length > 0) {
           setActiveRep(resData.reps[0].rep_number);
+          setSeekTimestamp(resData.reps[0].bottom_timestamp_s);
+        } else {
+          setActiveRep(null);
         }
         setLoading(false);
       })
       .catch((err) => {
         if (!isMounted) return;
-        setError(err.message);
+        setError(err instanceof Error ? err.message : 'Failed to load analysis results.');
         setLoading(false);
       });
 
@@ -83,743 +167,418 @@ export default function ResultsPage() {
     };
   }, [jobId]);
 
-  // Video event handlers
-  const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      const cur = videoRef.current.currentTime;
-      setCurrentTime(cur);
-
-      // Determine active rep from currentTime
-      if (result?.reps) {
-        const matchingRep = result.reps.find(
-          (r: any) => cur >= r.start_timestamp_s && cur <= r.end_timestamp_s
-        );
-        if (matchingRep && matchingRep.rep_number !== activeRep) {
-          setActiveRep(matchingRep.rep_number);
-        }
-      }
-    }
-  };
-
-  const togglePlay = () => {
-    if (!videoRef.current) return;
-    if (videoRef.current.paused) {
-      videoRef.current.play();
-      setIsPlaying(true);
-    } else {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const stepFrames = (framesDelta: number) => {
-    if (!videoRef.current) return;
-    const fps = result?.video_fps || 30;
-    videoRef.current.pause();
-    setIsPlaying(false);
-    videoRef.current.currentTime = Math.max(
-      0,
-      Math.min(duration, videoRef.current.currentTime + framesDelta / fps)
-    );
-  };
-
-  const jumpToRep = (repNumber: number) => {
-    setActiveRep(repNumber);
-    if (!videoRef.current || !result?.reps) return;
-    const rep = result.reps.find((r: any) => r.rep_number === repNumber);
-    if (rep) {
-      videoRef.current.currentTime = rep.start_timestamp_s;
-    }
-  };
-
-  const jumpToFrame = (timestampS?: number) => {
-    if (!videoRef.current || timestampS === undefined || timestampS === null) return;
-    videoRef.current.currentTime = timestampS;
-    videoRef.current.pause();
-    setIsPlaying(false);
-  };
-
-  // Keyboard shortcuts (Desktop)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        togglePlay();
-      } else if (e.code === 'ArrowRight') {
-        e.preventDefault();
-        stepFrames(e.shiftKey ? 5 : 1);
-      } else if (e.code === 'ArrowLeft') {
-        e.preventDefault();
-        stepFrames(e.shiftKey ? -5 : -1);
-      } else if (e.key === 'j' || e.key === 'J') {
-        e.preventDefault();
-        if (!result?.reps) return;
-        const currentIdx = result.reps.findIndex((r: any) => r.rep_number === activeRep);
-        if (currentIdx > 0) jumpToRep(result.reps[currentIdx - 1].rep_number);
-      } else if (e.key === 'k' || e.key === 'K') {
-        e.preventDefault();
-        if (!result?.reps) return;
-        const currentIdx = result.reps.findIndex((r: any) => r.rep_number === activeRep);
-        if (currentIdx >= 0 && currentIdx < result.reps.length - 1) {
-          jumpToRep(result.reps[currentIdx + 1].rep_number);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, activeRep, result, duration]);
-
-  // Share action
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'Forge AI Squat Analysis Results',
-          text: `Check out my squat technique analysis evaluated with Starting Strength rules!`,
+          title: 'Forge Squat Analysis',
+          text: 'Squat form evaluation against Starting Strength criteria',
           url: shareUrl,
         });
         return;
-      } catch (err) {
-        // user cancelled or share failed
+      } catch {
+        // ignore cancelled share
       }
     }
-    // Fallback: copy to clipboard
-    navigator.clipboard.writeText(shareUrl);
+    await navigator.clipboard.writeText(shareUrl);
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
   };
 
-  if (loading) {
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
-        <div className="flex items-center gap-3">
-          <SkeletonLoader variant="circle" height="h-8" />
-          <SkeletonLoader variant="bar" height="h-6" className="w-48" />
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <SkeletonLoader variant="card" height="h-96" className="lg:col-span-2" />
-          <SkeletonLoader variant="card" height="h-96" />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <SkeletonLoader variant="card" height="h-44" />
-          <SkeletonLoader variant="card" height="h-44" />
-          <SkeletonLoader variant="card" height="h-44" />
-        </div>
-      </div>
-    );
-  }
+  const reps = result?.reps ?? [];
 
-  if (error || !result) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 text-center">
-        <div className="p-4 rounded-full bg-forge-red/10 border border-forge-red/30 mb-4 text-forge-red">
-          <AlertTriangle size={32} />
-        </div>
-        <h2 className="text-2xl font-display font-bold uppercase text-white mb-2">
-          Unable to Load Results
-        </h2>
-        <p className="text-forge-grey text-sm max-w-md mb-6">{error || 'Job not found.'}</p>
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-forge-red text-white text-xs font-bold uppercase tracking-wider hover:bg-forge-red-dark transition-colors"
-        >
-          <ArrowLeft size={16} />
-          Back to Upload
-        </button>
-      </div>
-    );
-  }
+  const repScopedFindings = useMemo(() => {
+    const all = result?.findings ?? [];
+    if (activeRep === null) return all;
+    return all.filter((f) => f.rep_number === activeRep || f.rep_number === null);
+  }, [result?.findings, activeRep]);
 
-  const findings = result.findings || [];
-  const reps = result.reps || [];
-  const coaching = result.coaching || {};
-  const qGate = result.quality_gate || {};
+  const meetsCount = repScopedFindings.filter((f) => f.result === 'meets_standard').length;
+  const failsCount = repScopedFindings.filter((f) => f.result === 'does_not_meet_standard').length;
+  const cannotCount = repScopedFindings.filter((f) => f.result === 'cannot_assess').length;
 
-  // Stats
-  const meetsCount = findings.filter((f: any) => f.result === 'meets_standard').length;
-  const failsCount = findings.filter((f: any) => f.result === 'does_not_meet_standard').length;
-  const cannotCount = findings.filter((f: any) => f.result === 'cannot_assess').length;
-
-  const filteredFindings = findings.filter((f: any) => {
+  const filteredFindings = repScopedFindings.filter((f) => {
     if (filterResult === 'meets') return f.result === 'meets_standard';
     if (filterResult === 'fails') return f.result === 'does_not_meet_standard';
     if (filterResult === 'cannot') return f.result === 'cannot_assess';
-    if (activeRep !== null) {
-      // Show findings for active rep or general cannot_assess
-      return f.rep_number === activeRep || f.rep_number === null;
-    }
     return true;
   });
 
+  if (loading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 py-12 space-y-6">
+        <div className="type-eyebrow text-[#CCFF00]">Loading analysis report…</div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-8 h-96 bg-[var(--card-bg)] border border-[var(--hairline)] animate-pulse" />
+          <div className="lg:col-span-4 h-96 bg-[var(--card-bg)] border border-[var(--hairline)] animate-pulse" />
+        </div>
+      </div>
+    );
+  }
+
+  if (emptyHistory) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-16">
+        <SelectionBox color="violet" cornerSize={6}>
+          <div className="p-8 bg-[var(--card-bg)] text-center space-y-4">
+            <h1 className="type-h2">No results yet</h1>
+            <p className="type-body text-[var(--text)]/70 max-w-md mx-auto">
+              Upload a side-view squat clip to review your annotated video, rep metrics, and rule findings.
+            </p>
+            <ButtonLink to="/" variant="primary">
+              Upload a squat video
+            </ButtonLink>
+          </div>
+        </SelectionBox>
+      </div>
+    );
+  }
+
+  if (error || !result || !jobId) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-16">
+        <SelectionBox color="magenta" cornerSize={6}>
+          <div className="p-8 bg-[var(--card-bg)] text-center space-y-4">
+            <AlertTriangle className="text-[#F040B8] mx-auto" size={28} />
+            <h1 className="type-h2">Report unavailable</h1>
+            <p className="type-small text-[var(--text)]/75">
+              {error || 'This report may have expired (6-hour server limit).'}
+            </p>
+            <ButtonLink to="/" variant="primary">
+              Analyze a new video
+            </ButtonLink>
+          </div>
+        </SelectionBox>
+      </div>
+    );
+  }
+
+  const coaching = result.coaching;
+  const activeRepMetrics: Record<string, Metric> | undefined =
+    activeRep !== null && result.per_rep_metrics ? result.per_rep_metrics[activeRep] : undefined;
+
+  const verdictLabel =
+    failsCount === 0 && meetsCount > 0
+      ? 'Meets criteria'
+      : failsCount > 0
+      ? 'Issues found'
+      : 'Cannot assess';
+  const verdictVariant = failsCount === 0 && meetsCount > 0 ? 'lime' : 'magenta';
+
+  const coachingLabel =
+    coaching.generated_by && coaching.generated_by !== 'template'
+      ? `Rules: Deterministic YAML · Copy: ${coaching.generated_by.toUpperCase()} (cannot change verdicts)`
+      : coaching.llm_failed
+      ? 'Rules: Deterministic YAML · Copy: Template fallback (LLM unavailable)'
+      : 'Rules: Deterministic YAML · Copy: Template fallback (no LLM key set)';
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 sm:py-8 space-y-6">
-      {/* Top action bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-forge-border pb-4">
+    <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-12 space-y-8">
+      {/* Header Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--hairline)] pb-4">
         <div className="flex items-center gap-3">
-          <Link
-            to="/"
-            className="p-2 rounded-lg bg-forge-surface border border-forge-border text-forge-grey hover:text-white transition-colors"
-            title="Upload new video"
-          >
-            <ArrowLeft size={18} />
-          </Link>
+          <ButtonLink to="/" variant="secondary" size="sm" aria-label="Back to upload">
+            <ArrowLeft size={14} />
+          </ButtonLink>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="eyebrow">ANALYSIS REPORT</span>
-              <span className="text-[10px] text-forge-grey">#{jobId?.slice(0, 8)}</span>
+            <div className="flex items-center gap-3">
+              <span className="type-eyebrow text-[#CCFF00]">Analysis report</span>
+              <span className="type-mono text-[var(--text)]/55">#{jobId.slice(0, 8)}</span>
             </div>
-            <h1 className="display-heading text-2xl sm:text-3xl text-white">
-              SQUAT KINEMATIC AUDIT
-            </h1>
+            <h1 className="type-h2 mt-1">Squat findings</h1>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleShare}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-forge-surface border border-forge-border text-forge-grey hover:text-white text-xs font-semibold transition-colors"
-          >
+          <Button variant="secondary" size="sm" onClick={handleShare}>
             <Share2 size={14} />
-            {shareCopied ? 'Copied Link!' : 'Share'}
-          </button>
+            <span>{shareCopied ? 'Link copied' : 'Share'}</span>
+          </Button>
           <a
-            href={getVideoUrl(jobId!)}
-            download={`squat_analysis_${jobId?.slice(0, 8)}.mp4`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-forge-red/10 border border-forge-red/30 text-forge-red hover:bg-forge-red/20 text-xs font-semibold transition-colors"
+            href={getVideoUrl(jobId)}
+            download={`squat_analysis_${jobId.slice(0, 8)}.mp4`}
+            className="btn btn-sm btn-primary"
           >
             <Download size={14} />
-            Annotated MP4
+            <span>Annotated MP4</span>
           </a>
         </div>
       </div>
 
-      {/* Bento Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* ============================================================ */}
-        {/* HERO TILE: Video Player (lg:col-span-8) */}
-        {/* ============================================================ */}
-        <div className="lg:col-span-8 glass-card p-4 rounded-2xl border border-forge-border space-y-4">
-          <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center">
-            <video
-              ref={videoRef}
-              src={getVideoUrl(jobId!)}
-              className="w-full h-full object-contain"
-              playsInline
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={() => {
-                if (videoRef.current) setDuration(videoRef.current.duration);
-              }}
-              onEnded={() => setIsPlaying(false)}
+      {/* Row 1: Video + Summary / Fix Next / Quality Gate */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="lg:col-span-8">
+          <PixelTile headerTag="Annotated video" headerRight={`${result.video_fps || 30} fps`}>
+            <VideoPlayer
+              videoUrl={getVideoUrl(jobId)}
+              fps={result.video_fps || 30}
+              durationFallback={result.video_duration_s || 0}
+              frames={framesData?.frames ?? []}
+              reps={reps}
+              activeRep={activeRep}
+              onSelectRep={setActiveRep}
+              seekTimestamp={seekTimestamp}
             />
+          </PixelTile>
+        </div>
 
-            {/* Rep indicator overlay */}
-            {activeRep && (
-              <div className="absolute top-3 right-3 px-3 py-1 rounded-lg bg-forge-red text-white text-xs font-display font-black tracking-wider uppercase shadow-red-glow">
-                REP {activeRep}
+        <div className="lg:col-span-4 space-y-4">
+          <SelectionBox color={failsCount > 0 ? 'magenta' : 'lime'} cornerSize={6}>
+            <div className="p-4 sm:p-6 bg-[var(--card-bg)] space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="type-eyebrow text-[#CCFF00]">Summary</span>
+                <TagChip label={verdictLabel} variant={verdictVariant} />
               </div>
-            )}
-          </div>
 
-          {/* Video Controls & Scrubber */}
-          <div className="space-y-3">
-            {/* Timeline scrubber with rep markers */}
-            <div className="relative pt-1">
-              <input
-                type="range"
-                min={0}
-                max={duration || 100}
-                step={0.01}
-                value={currentTime}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  setCurrentTime(val);
-                  if (videoRef.current) videoRef.current.currentTime = val;
-                }}
-                className="w-full h-1.5 bg-forge-surface rounded-lg appearance-none cursor-pointer accent-forge-red"
-              />
-              {/* Rep markers */}
-              {duration > 0 &&
-                reps.map((r: any) => {
-                  const startPct = (r.start_timestamp_s / duration) * 100;
-                  const bottomPct = (r.bottom_timestamp_s / duration) * 100;
+              {/* Real Tallies */}
+              <div className="grid grid-cols-4 border border-[var(--hairline)] divide-x divide-[var(--hairline)] bg-[var(--bg)] text-center py-2">
+                <div>
+                  <div className="font-mono text-lg font-bold">{reps.length}</div>
+                  <div className="type-mono text-[10px] text-[var(--text)]/55">Reps</div>
+                </div>
+                <div>
+                  <div className="font-mono text-lg font-bold text-[#CCFF00]">{meetsCount}</div>
+                  <div className="type-mono text-[10px] text-[#CCFF00]">Meets</div>
+                </div>
+                <div>
+                  <div className="font-mono text-lg font-bold text-[#F040B8]">{failsCount}</div>
+                  <div className="type-mono text-[10px] text-[#F040B8]">Issues</div>
+                </div>
+                <div>
+                  <div className="font-mono text-lg font-bold text-[#A97BFF]">{cannotCount}</div>
+                  <div className="type-mono text-[10px] text-[#A97BFF]">N/A</div>
+                </div>
+              </div>
+
+              {/* Fix This Next */}
+              <div className="space-y-2">
+                <div className="type-eyebrow text-[#F040B8]">Fix this next</div>
+                <p className="type-small text-[var(--text)]/90 p-3 bg-[var(--bg)] border border-[var(--hairline)]">
+                  {coaching.summary}
+                </p>
+
+                {coaching.top_fixes && coaching.top_fixes.length > 0 && (
+                  <ul className="space-y-1.5 type-small text-[var(--text)]/80 pt-1">
+                    {coaching.top_fixes.slice(0, 3).map((fix, idx) => (
+                      <li key={idx} className="flex items-start gap-2">
+                        <span className="type-mono text-[#F040B8] font-bold">{idx + 1}.</span>
+                        <span>{fix}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Honest LLM-vs-Deterministic Source Label */}
+              <div className="pt-3 border-t border-[var(--hairline)] type-mono text-[11px] text-[var(--text)]/65 space-y-1">
+                <div>{coachingLabel}</div>
+                {coaching.llm_failed && coaching.llm_failure_reason && (
+                  <div className="text-[#F5FF00]">{coaching.llm_failure_reason}</div>
+                )}
+              </div>
+            </div>
+          </SelectionBox>
+
+          <QualityBadge qualityGate={result.quality_gate} />
+        </div>
+      </div>
+
+      {/* Observed vs Estimated Legend Bar */}
+      <div
+        role="note"
+        aria-label="Observed vs estimated metric legend"
+        className="p-4 border border-[var(--hairline)] bg-[var(--card-bg)] flex flex-wrap items-center justify-between gap-4 type-small"
+      >
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <TagChip label="Observed" variant="lime" />
+            <span className="text-[var(--text)]/75">Direct 2D pose or CSRT bar measurement</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <TagChip label="Estimated" variant="outline" />
+            <span className="text-[var(--text)]/75">Inferred from 2D proxies or low visibility</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <TagChip label="Assumption" variant="yellow" />
+            <span className="text-[var(--text)]/75">Numeric tolerance added where text is qualitative</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 2: Real Per-Rep Kinematics + Bar Path Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-6">
+          <PixelTile
+            headerTag={activeRep ? `Rep ${activeRep} metrics` : 'Per-rep metrics'}
+            headerRight={activeRep ? `Bottom frame · Confidence shown` : 'Select a rep'}
+          >
+            {activeRepMetrics ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {REP_METRIC_DEFS.map((def) => {
+                  const m = activeRepMetrics[def.key];
+                  if (!m) return null;
                   return (
                     <div
-                      key={r.rep_number}
-                      className="absolute top-0 pointer-events-none"
-                      style={{ left: `${startPct}%` }}
+                      key={def.key}
+                      className={`p-3 bg-[var(--bg)] border space-y-1 ${
+                        m.is_estimated
+                          ? 'border-dashed border-[var(--hairline)]'
+                          : 'border-[var(--hairline)]'
+                      }`}
                     >
-                      <div className="h-2 w-0.5 bg-forge-grey/60" />
-                      <span className="text-[9px] font-mono text-forge-grey absolute -top-3.5 -left-2">
-                        R{r.rep_number}
-                      </span>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="type-mono text-[10px] text-[var(--text)]/60 uppercase truncate">
+                          {def.label}
+                        </span>
+                      </div>
+                      <div className="font-mono text-base font-bold text-[#CCFF00]">
+                        {def.formatVal(m.value, m.unit)}
+                      </div>
+                      <div className="flex items-center justify-between gap-1 type-mono text-[10px]">
+                        <span className={m.is_estimated ? 'text-[#F5FF00]' : 'text-[var(--text)]/70'}>
+                          {m.is_estimated ? 'Estimated' : 'Observed'}
+                        </span>
+                        <span className="text-[var(--text)]/55">
+                          {Math.round((m.confidence ?? 0) * 100)}%
+                        </span>
+                      </div>
+                      <div className="type-small text-[11px] text-[var(--text)]/55 truncate" title={def.target}>
+                        {def.target}
+                      </div>
                     </div>
                   );
                 })}
-            </div>
-
-            {/* Controls bar */}
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={togglePlay}
-                  className="w-8 h-8 rounded-lg bg-forge-red text-white flex items-center justify-center hover:bg-forge-red-dark transition-colors"
-                >
-                  {isPlaying ? <Pause size={14} /> : <Play size={14} className="ml-0.5" />}
-                </button>
-                <button
-                  onClick={() => stepFrames(-1)}
-                  className="p-1.5 rounded-lg bg-forge-surface border border-forge-border text-forge-grey hover:text-white transition-colors"
-                  title="Previous frame (Left arrow)"
-                >
-                  <SkipBack size={14} />
-                </button>
-                <button
-                  onClick={() => stepFrames(1)}
-                  className="p-1.5 rounded-lg bg-forge-surface border border-forge-border text-forge-grey hover:text-white transition-colors"
-                  title="Next frame (Right arrow)"
-                >
-                  <SkipForward size={14} />
-                </button>
-                <span className="font-mono text-forge-grey ml-2">
-                  {currentTime.toFixed(2)}s / {duration.toFixed(2)}s
-                </span>
               </div>
-
-              {/* Rep jump buttons */}
-              <div className="flex items-center gap-1">
-                <span className="text-forge-grey text-[11px] mr-1 hidden sm:inline">Rep:</span>
-                {reps.map((r: any) => (
-                  <button
-                    key={r.rep_number}
-                    onClick={() => jumpToRep(r.rep_number)}
-                    className={`px-2 py-0.5 rounded text-xs font-mono font-bold transition-colors ${
-                      activeRep === r.rep_number
-                        ? 'bg-forge-red text-white'
-                        : 'bg-forge-surface text-forge-grey hover:text-white border border-forge-border'
-                    }`}
-                  >
-                    R{r.rep_number}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ============================================================ */}
-        {/* SUMMARY / SCORE TILE (lg:col-span-4) */}
-        {/* ============================================================ */}
-        <div className="lg:col-span-4 space-y-4">
-          <div className="glass-card p-5 rounded-2xl border border-forge-border space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="eyebrow">AUDIT VERDICT</span>
-              <span
-                className={`badge ${
-                  failsCount === 0 && meetsCount > 0
-                    ? 'badge-green'
-                    : failsCount > 0
-                    ? 'badge-red'
-                    : 'badge-grey'
-                }`}
-              >
-                {failsCount === 0 && meetsCount > 0
-                  ? 'STANDARD MET'
-                  : failsCount > 0
-                  ? 'NEEDS REVISION'
-                  : 'INCONCLUSIVE'}
-              </span>
-            </div>
-
-            {/* Reps and findings tallies */}
-            <div className="grid grid-cols-3 gap-2 py-2 border-y border-forge-border text-center">
-              <div>
-                <div className="display-heading text-2xl text-white">{reps.length}</div>
-                <div className="text-[10px] text-forge-grey uppercase tracking-wider">Reps</div>
-              </div>
-              <div>
-                <div className="display-heading text-2xl text-forge-green">{meetsCount}</div>
-                <div className="text-[10px] text-forge-grey uppercase tracking-wider">Pass</div>
-              </div>
-              <div>
-                <div className="display-heading text-2xl text-forge-red">{failsCount}</div>
-                <div className="text-[10px] text-forge-grey uppercase tracking-wider">Issues</div>
-              </div>
-            </div>
-
-            {/* Coaching Text Tile */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs uppercase tracking-eyebrow text-forge-red font-display font-bold flex items-center gap-1.5">
-                  <Sparkles size={13} />
-                  Coaching Notes
-                </span>
-                <span className="text-[10px] text-forge-grey/70">
-                  {coaching.generated_by === 'gemini'
-                    ? 'Gemini 1.5'
-                    : coaching.generated_by === 'anthropic'
-                    ? 'Claude'
-                    : 'Deterministic Engine'}
-                </span>
-              </div>
-              <p className="text-xs text-forge-white/90 leading-relaxed bg-white/5 p-3 rounded-xl border border-forge-border">
-                {coaching.summary || 'Squat analysis complete. Review individual criteria below.'}
-              </p>
-            </div>
-
-            {/* Top 3 Fixes */}
-            {coaching.top_fixes && coaching.top_fixes.length > 0 && (
-              <div className="space-y-2">
-                <span className="eyebrow">Top Priorities to Fix</span>
-                <ul className="space-y-1.5 text-xs text-forge-grey">
-                  {coaching.top_fixes.map((fix: string, idx: number) => (
-                    <li key={idx} className="flex items-start gap-2">
-                      <span className="font-mono text-forge-red font-bold">{idx + 1}.</span>
-                      <span className="text-white/90">{fix}</span>
-                    </li>
-                  ))}
-                </ul>
+            ) : (
+              <div className="py-8 text-center type-small text-[var(--text)]/65">
+                Select a specific rep button (`R1`, `R2`…) under the video to inspect per-rep measurements.
               </div>
             )}
-          </div>
+          </PixelTile>
+        </div>
 
-          {/* Quality Gate Status */}
-          <QualityBadge qualityGate={qGate} />
+        <div className="lg:col-span-6">
+          <PixelTile
+            headerTag="Bar path drift"
+            headerRight={activeRep ? `Rep ${activeRep}` : 'Full video'}
+          >
+            <BarPathChart framesData={framesData} activeRep={activeRep} />
+            <p className="mt-3 pt-3 border-t border-[var(--hairline)] type-small text-[var(--text)]/70">
+              Starting Strength p. 10, Fig 2-7: &ldquo;The bar moves in a straight vertical line—the most efficient path between two points.&rdquo;
+            </p>
+          </PixelTile>
         </div>
       </div>
 
-      {/* ============================================================ */}
-      {/* SECONDARY ROW: Kinematic Metrics & Bar Path Chart */}
-      {/* ============================================================ */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Per-Rep Kinematic Gauges (lg:col-span-6) */}
-        <div className="lg:col-span-6 glass-card p-5 rounded-2xl border border-forge-border space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="eyebrow">
-              {activeRep ? `Rep ${activeRep} Kinematics` : 'Overall Kinematics'}
-            </span>
-            <span className="badge badge-orange">ESTIMATE LABELED</span>
+      {/* Row 3: Findings List */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[var(--hairline)] pb-4">
+          <div className="space-y-1">
+            <div className="type-eyebrow text-[#CCFF00]">Rule evaluation</div>
+            <h2 className="type-h2">
+              {activeRep ? `Rep ${activeRep} findings` : 'All findings'}
+            </h2>
           </div>
 
-          {/* Active Rep Metrics Grid */}
-          {result.per_rep_metrics && activeRep && result.per_rep_metrics[activeRep] ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {/* Depth */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Depth Proxy
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].depth_hip_vs_knee?.value !== null
-                    ? `${result.per_rep_metrics[activeRep].depth_hip_vs_knee.value > 0 ? '+' : ''}${result.per_rep_metrics[activeRep].depth_hip_vs_knee.value}px`
-                    : 'N/A'}
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-forge-grey">
-                  <span className="badge badge-orange py-0 text-[9px]">ESTIMATE</span>
-                  <span>hip vs knee</span>
-                </div>
-              </div>
-
-              {/* Back angle */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Back Angle
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].back_angle_bottom?.value !== null
-                    ? `${result.per_rep_metrics[activeRep].back_angle_bottom.value}°`
-                    : 'N/A'}
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-forge-grey">
-                  <span>Target: ~45°</span>
-                  <span className="text-[9px] text-forge-red">±10° tol</span>
-                </div>
-              </div>
-
-              {/* Knee flexion */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Knee Flexion
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].knee_angle_bottom?.value !== null
-                    ? `${result.per_rep_metrics[activeRep].knee_angle_bottom.value}°`
-                    : 'N/A'}
-                </div>
-                <span className="text-[10px] text-forge-grey block">at bottom</span>
-              </div>
-
-              {/* Hip drive */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Hip Drive
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].hip_drive?.value === 1.0
-                    ? 'Hips Lead'
-                    : result.per_rep_metrics[activeRep].hip_drive?.value === 0.0
-                    ? 'Chest Lead'
-                    : 'N/A'}
-                </div>
-                <span className="badge badge-orange py-0 text-[9px]">ESTIMATE</span>
-              </div>
-
-              {/* Bar midfoot offset */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Midfoot Offset
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].bar_midfoot_offset?.value !== null
-                    ? `${result.per_rep_metrics[activeRep].bar_midfoot_offset.value}px`
-                    : 'N/A'}
-                </div>
-                <span className="text-[10px] text-forge-grey block">Max over ROM</span>
-              </div>
-
-              {/* Bar vertical std */}
-              <div className="bg-forge-surface p-3 rounded-xl border border-forge-border space-y-1">
-                <span className="text-[10px] uppercase text-forge-grey font-display tracking-wider block">
-                  Path Deviation
-                </span>
-                <div className="text-lg font-mono font-bold text-white">
-                  {result.per_rep_metrics[activeRep].bar_path_std?.value !== null
-                    ? `${result.per_rep_metrics[activeRep].bar_path_std.value}px`
-                    : 'N/A'}
-                </div>
-                <span className="text-[10px] text-forge-grey block">x-std dev</span>
-              </div>
-            </div>
-          ) : (
-            <div className="p-6 text-center text-forge-grey text-xs">
-              Select a rep above to inspect kinematics.
-            </div>
-          )}
-
-          {/* Observed vs Estimated Legend */}
-          <div className="p-3 bg-white/5 rounded-xl border border-forge-border text-[11px] text-forge-grey space-y-1">
-            <div className="flex items-center gap-1.5 text-white font-semibold">
-              <Info size={13} className="text-forge-red" />
-              Observed vs. Estimated Legend
-            </div>
-            <p>
-              <strong>Observed:</strong> Pure 2D geometric measurements extracted directly from visible joint vectors (e.g. back angle from shoulder to hip).
-            </p>
-            <p>
-              <strong>Estimated:</strong> Proxies for 3D anatomical structures inferred from 2D landmarks (e.g. depth using knee landmark for patella, or gaze from ear-nose line). Marked with uncertainty.
-            </p>
-          </div>
-        </div>
-
-        {/* Bar Path Chart (lg:col-span-6) */}
-        <div className="lg:col-span-6 glass-card p-5 rounded-2xl border border-forge-border space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="eyebrow">Barbell Trajectory</span>
-            <span className="text-xs text-forge-grey font-mono">
-              {activeRep ? `Rep ${activeRep} Drift` : 'Full Video Path'}
-            </span>
-          </div>
-          <BarPathChart framesData={framesData} activeRep={activeRep ?? undefined} />
-          <p className="text-[11px] text-forge-grey leading-relaxed">
-            Per Chapter 1, Fig 2-7: <em>"The bar moves in a straight vertical line—the most efficient path between two points."</em> Horizontal drift away from vertical baseline reduces mechanical efficiency.
-          </p>
-        </div>
-      </div>
-
-      {/* ============================================================ */}
-      {/* FINDINGS SECTION: Full Bento Grid of Audited Criteria */}
-      {/* ============================================================ */}
-      <div className="space-y-4 pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <span className="eyebrow">AUDIT FINDINGS</span>
-            <h3 className="display-heading text-xl sm:text-2xl text-white">
-              DETAILED ASSESSMENT BREAKDOWN
-            </h3>
-          </div>
-
-          {/* Filter Pills */}
-          <div className="flex items-center gap-1.5 bg-forge-surface p-1 rounded-xl border border-forge-border text-xs">
-            {['all', 'meets', 'fails', 'cannot'].map((f) => (
+          <div className="flex flex-wrap items-center gap-1 p-1 bg-[var(--card-bg)] border border-[var(--hairline)]">
+            {(
+              [
+                { id: 'all', label: `All (${repScopedFindings.length})` },
+                { id: 'meets', label: `Meets (${meetsCount})` },
+                { id: 'fails', label: `Issues (${failsCount})` },
+                { id: 'cannot', label: `Cannot assess (${cannotCount})` },
+              ] as const
+            ).map((f) => (
               <button
-                key={f}
-                onClick={() => setFilterResult(f)}
-                className={`px-3 py-1 rounded-lg font-display uppercase tracking-wider font-bold transition-colors ${
-                  filterResult === f
-                    ? 'bg-forge-red text-white'
-                    : 'text-forge-grey hover:text-white'
+                key={f.id}
+                type="button"
+                onClick={() => setFilterResult(f.id)}
+                className={`px-3 py-1.5 font-pixel text-[10px] uppercase transition-colors ${
+                  filterResult === f.id
+                    ? 'bg-[#CCFF00] text-[#0A0A0A] font-bold'
+                    : 'text-[var(--text)]/65 hover:text-[var(--text)]'
                 }`}
               >
-                {f === 'all'
-                  ? 'All'
-                  : f === 'meets'
-                  ? `Pass (${meetsCount})`
-                  : f === 'fails'
-                  ? `Issues (${failsCount})`
-                  : `Cannot Assess (${cannotCount})`}
+                {f.label}
               </button>
             ))}
           </div>
         </div>
 
-        {/* Grid of findings */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredFindings.map((finding: Finding, idx: number) => {
-            const isMeets = finding.result === 'meets_standard';
-            const isFails = finding.result === 'does_not_meet_standard';
-
-            return (
-              <motion.div
-                key={`${finding.criterion_id}-${finding.rep_number}-${idx}`}
-                layout
-                className={`p-5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-4 ${
-                  isMeets
-                    ? 'bg-forge-card border-forge-border hover:border-forge-green/40'
-                    : isFails
-                    ? 'bg-forge-card border-forge-red/30 shadow-red-glow/20 hover:border-forge-red'
-                    : 'bg-forge-card/60 border-forge-border/40 opacity-70'
-                }`}
-              >
-                {/* Header */}
-                <div className="space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <span
-                      className={`badge text-[10px] ${
-                        isMeets
-                          ? 'badge-green'
-                          : isFails
-                          ? 'badge-red'
-                          : 'badge-grey'
-                      }`}
-                    >
-                      {isMeets ? 'PASS' : isFails ? 'DOES NOT MEET' : 'CANNOT ASSESS'}
-                    </span>
-                    {finding.rep_number && (
-                      <span className="text-[10px] font-mono text-forge-grey">
-                        Rep {finding.rep_number}
-                      </span>
-                    )}
-                  </div>
-
-                  <h4 className="font-display font-bold text-base uppercase text-white leading-tight">
-                    {finding.title}
-                  </h4>
-
-                  <p className="text-xs text-forge-grey leading-relaxed">
-                    {finding.short_explanation}
-                  </p>
-                </div>
-
-                {/* Fix & Assumption Badges */}
-                <div className="space-y-3 pt-2 border-t border-forge-border/60">
-                  {finding.actionable_fix && (
-                    <div className="text-xs">
-                      <span className="text-forge-red font-semibold block mb-0.5">Fix:</span>
-                      <span className="text-white/80">{finding.actionable_fix}</span>
-                    </div>
-                  )}
-
-                  {finding.has_implementation_assumption && (
-                    <div className="text-[10px] text-amber-400 bg-amber-400/10 p-2 rounded-lg border border-amber-400/20">
-                      <strong>Assumption:</strong> {finding.implementation_assumption_text}
-                    </div>
-                  )}
-
-                  {/* Footer metadata & Citation chip */}
-                  <div className="flex items-center justify-between text-[11px] pt-1">
-                    <button
-                      onClick={() => setSelectedCitation(finding)}
-                      className="inline-flex items-center gap-1 text-forge-red hover:text-white transition-colors underline underline-offset-2"
-                    >
-                      <BookOpen size={11} />
-                      p. {finding.source_page} ({finding.source_section})
-                    </button>
-
-                    {finding.timestamp_s !== null && finding.timestamp_s !== undefined && (
-                      <button
-                        onClick={() => jumpToFrame(finding.timestamp_s!)}
-                        className="text-forge-grey hover:text-white transition-colors font-mono"
-                        title="Seek video to this finding"
-                      >
-                        @{finding.timestamp_s.toFixed(1)}s
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            );
-          })}
+          {filteredFindings.map((finding, idx) => (
+            <FindingCard
+              key={`${finding.criterion_id}-${finding.rep_number}-${idx}`}
+              finding={finding}
+              isActive={activeFindingIdx === idx}
+              onSelect={() => {
+                setActiveFindingIdx(idx);
+                if (finding.timestamp_s !== null && finding.timestamp_s !== undefined) {
+                  setSeekTimestamp(finding.timestamp_s);
+                }
+              }}
+              onCite={(f) => setSelectedCitation(f)}
+            />
+          ))}
         </div>
-      </div>
+      </section>
 
       {/* Citation Modal */}
-      <AnimatePresence>
-        {selectedCitation && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="glass-card p-6 rounded-2xl border border-forge-border max-w-lg w-full space-y-4"
-            >
-              <div className="flex items-center justify-between border-b border-forge-border pb-3">
-                <div>
-                  <span className="eyebrow">REFERENCE GROUNDING</span>
-                  <h4 className="font-display font-bold text-lg uppercase text-white">
+      {selectedCitation && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="citation-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm"
+        >
+          <SelectionBox color="lime" cornerSize={6} className="max-w-lg w-full">
+            <div className="p-6 bg-[#0A0A0A] space-y-4">
+              <div className="flex items-start justify-between gap-4 border-b border-[var(--hairline)] pb-3">
+                <div className="space-y-1">
+                  <div className="type-eyebrow text-[#CCFF00] flex items-center gap-1.5">
+                    <BookOpen size={12} />
+                    <span>Starting Strength Reference</span>
+                  </div>
+                  <h3 id="citation-modal-title" className="type-h3">
                     {selectedCitation.title}
-                  </h4>
+                  </h3>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setSelectedCitation(null)}
-                  className="p-1.5 rounded-lg bg-forge-surface text-forge-grey hover:text-white"
+                  aria-label="Close citation dialog"
+                  className="text-[var(--text)]/60 hover:text-[var(--text)]"
                 >
                   <XCircle size={18} />
                 </button>
               </div>
 
-              <div className="space-y-3 text-xs leading-relaxed">
-                <div>
-                  <span className="text-forge-grey block">Source Citation:</span>
-                  <span className="text-white font-semibold">
-                    Starting Strength (Reference Chapter), Page {selectedCitation.source_page},{' '}
-                    {selectedCitation.source_section}
-                  </span>
+              <div className="space-y-3 type-small">
+                <div className="type-mono text-[#A97BFF]">
+                  Reference chapter, p. {selectedCitation.source_page} ({selectedCitation.source_section})
                 </div>
 
-                <div className="p-3 bg-forge-surface rounded-xl border border-forge-border">
-                  <span className="text-forge-red font-display text-[10px] uppercase tracking-wider font-bold block mb-1">
-                    Verbatim Rule Text:
-                  </span>
-                  <blockquote className="italic text-forge-white/90">
-                    "{selectedCitation.verbatim_quote || 'Quote available in squat_skill.yaml'}"
-                  </blockquote>
-                </div>
+                <blockquote className="p-3 bg-[var(--card-bg)] border border-[var(--hairline)] italic text-[var(--text)]/90">
+                  {selectedCitation.verbatim_quote || 'Rule quote defined in skill/squat_skill.yaml.'}
+                </blockquote>
 
                 {selectedCitation.uncertainty_note && (
-                  <div>
-                    <span className="text-forge-grey block">Uncertainty Note:</span>
-                    <span className="text-amber-300">{selectedCitation.uncertainty_note}</span>
+                  <div className="p-3 border border-[#F5FF00]/60 bg-[#F5FF00]/10 text-[#F5FF00]">
+                    {selectedCitation.uncertainty_note}
                   </div>
                 )}
               </div>
 
-              <div className="pt-2 flex justify-end">
-                <button
-                  onClick={() => setSelectedCitation(null)}
-                  className="px-4 py-2 rounded-xl bg-forge-surface border border-forge-border text-xs text-white hover:border-forge-red transition-colors"
-                >
+              <div className="flex justify-end pt-2">
+                <Button variant="primary" size="sm" onClick={() => setSelectedCitation(null)}>
                   Close
-                </button>
+                </Button>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          </SelectionBox>
+        </div>
+      )}
     </div>
   );
 }
-
