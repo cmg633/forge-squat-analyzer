@@ -27,6 +27,8 @@ tmp/
 # Build outputs
 frontend/dist/
 frontend/dist-ssr/
+frontend/.vercel/
+.vercel/
 *.local
 
 # Secrets & Environment
