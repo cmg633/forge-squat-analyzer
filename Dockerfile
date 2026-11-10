@@ -13,6 +13,8 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ffmpeg \
+    libegl1 \
+    libgles2 \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
