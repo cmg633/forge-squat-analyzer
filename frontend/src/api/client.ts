@@ -5,7 +5,7 @@ import type {
   FramesResponse,
 } from '../types/analysis';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:7860';
+const API_URL = '/api';
 
 // ─── Retry helper ─────────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ async function fetchWithRetry(
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < retries - 1) {
-        await new Promise(r => setTimeout(r, delayMs * 2 ** attempt));
+        await new Promise((r) => setTimeout(r, delayMs * 2 ** attempt));
       }
     }
   }
@@ -48,7 +48,7 @@ export async function uploadVideo(
 
     xhr.open('POST', `${API_URL}/analyze`);
 
-    xhr.upload.addEventListener('progress', e => {
+    xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
         onProgress(Math.round((e.loaded / e.total) * 100));
       }

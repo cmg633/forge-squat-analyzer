@@ -11,7 +11,7 @@ def run():
     print(f"Uploading {video_path} to backend...", flush=True)
     
     with open(video_path, "rb") as f:
-        res = requests.post("http://localhost:7860/analyze", files={"video": ("squat_clip_15s.mp4", f, "video/mp4")})
+        res = requests.post("http://localhost:7860/api/analyze", files={"video": ("squat_clip_15s.mp4", f, "video/mp4")})
     
     if res.status_code != 200:
         print(f"Upload failed: {res.text}", flush=True)
@@ -21,7 +21,7 @@ def run():
     print(f"Job created: {job_id}. Waiting for completion...", flush=True)
     
     for _ in range(60):
-        status_res = requests.get(f"http://localhost:7860/jobs/{job_id}").json()
+        status_res = requests.get(f"http://localhost:7860/api/jobs/{job_id}").json()
         status = status_res.get("status")
         progress = status_res.get("progress", 0)
         print(f"Status: {status} ({progress*100:.0f}%) - {status_res.get('status_message', '')}", flush=True)

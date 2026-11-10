@@ -31,11 +31,11 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cache app shell only — never API or video
+        // Cache app shell only — never API, health, docs, or video
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/video/, /^\/frames/],
+        navigateFallbackDenylist: [/^\/api/, /^\/health/, /^\/docs/, /^\/openapi\.json/],
       },
       devOptions: {
         enabled: false,
@@ -53,7 +53,10 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:7860',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/health': {
+        target: 'http://localhost:7860',
+        changeOrigin: true,
       },
     },
   },
@@ -69,4 +72,3 @@ export default defineConfig({
     },
   },
 });
-
