@@ -1,90 +1,103 @@
-# FORGE — AI Squat Analyser
+ <div align="center">
 
-<p align="center">
-  <img src="frontend/public/favicon.svg" width="80" height="80" alt="Forge Logo" />
-</p>
+<img src="frontend/public/favicon.svg" width="96" height="96" alt="Forge Logo" />
 
-<p align="center">
-  <strong>Production-grade, evidence-grounded computer-vision app for barbell squat kinematics.</strong><br>
-  Built with MediaPipe, OpenCV CSRT, SciPy, FastAPI, React 18, Tailwind CSS, Framer Motion, and Lenis.
-</p>
+# 🏋️ FORGE
+### AI Squat Analyser
 
-<p align="center">
-  <strong>Live App:</strong> <a href="https://forge-squat-analyzer.onrender.com">https://forge-squat-analyzer.onrender.com</a> •
-  <a href="https://forge-squat-analyzer.onrender.com/health">Health</a> •
-  <a href="https://forge-squat-analyzer.onrender.com/docs">API Docs</a>
-</p>
+**Production-grade, evidence-grounded computer vision for barbell squat kinematics.**
 
-<p align="center">
-  <a href="#quickstart">Quickstart</a> •
-  <a href="#neo-brutalist-design-system">Design System</a> •
-  <a href="#architecture">Architecture</a> •
-  <a href="#evidence--verification">Evidence & Verification</a> •
-  <a href="#skill-specification">Skill Specification</a> •
-  <a href="#documentation">Documentation</a>
-</p>
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React_18-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-0097A7?style=for-the-badge&logo=google&logoColor=white)
+
+[🚀 **Live App**](https://forge-squat-analyzer.onrender.com) · [❤️ Health](https://forge-squat-analyzer.onrender.com/health) · [📘 API Docs](https://forge-squat-analyzer.onrender.com/docs)
+
+[Quickstart](#-quickstart) · [Design System](#-neo-brutalist-design-system) · [Architecture](#-architecture) · [Verification](#-verification--tests) · [Docs](#-documentation)
+
+</div>
 
 ---
 
-## Visual Previews (Neo-Brutalist Design System)
+## 📸 Visual Previews
 
-| Landing Hero & Illustrative Demo | Design System Showcase (`/design`) |
-| :---: | :---: |
-| ![Landing Page](docs/screenshots/landing_page_neo_brutalist.png) | ![Design System](docs/screenshots/design_system_neo_brutalist.png) |
-
-| Real Video Kinematic Results (`/results/:id`) | Kinetic Footer Credit (`@Chiranth MG`) |
-| :---: | :---: |
-| ![Results Page](docs/screenshots/results_page_neo_brutalist.png) | ![Footer Credit](docs/screenshots/footer_credit_desktop.png) |
-
----
-
-## Overview
-
-Forge is an AI squat analysis system that assesses lifters against the definitive standard of strength training: **pages 1–35 of the Starting Strength reference chapter**.
-
-Unlike black-box fitness apps that invent ungrounded scores or hallucinate precision, Forge operates on strict engineering honesty:
-- **Deterministic Assessment:** Kinematic measurements are evaluated against rules defined in [`skill/squat_skill.yaml`](skill/squat_skill.yaml).
-- **Honest Uncertainty:** Every metric is explicitly tagged as **Observed** (direct 2D vector calculation) or **Estimated** (proxy for 3D anatomy). Criteria invisible from a side view (such as stance width, toe angle, and knee valgus) produce an explicit `cannot assess` status.
-- **Auditable Citations:** Every finding cites the exact page, figure, and section from the reference literature.
-- **Scoped AI Coaching:** LLMs (Gemini / Anthropic / local template) only write motivating coaching prose. They are strictly forbidden from modifying verdicts or hallucinating thresholds.
+<table>
+<tr>
+<td align="center" width="50%"><b>Landing Hero & Illustrative Demo</b><br><img src="docs/screenshots/landing_page_neo_brutalist.png" alt="Landing Page" /></td>
+<td align="center" width="50%"><b>Design System Showcase (<code>/design</code>)</b><br><img src="docs/screenshots/design_system_neo_brutalist.png" alt="Design System" /></td>
+</tr>
+<tr>
+<td align="center"><b>Real Video Kinematic Results (<code>/results/:id</code>)</b><br><img src="docs/screenshots/results_page_neo_brutalist.png" alt="Results Page" /></td>
+<td align="center"><b>Kinetic Footer Credit (<code>@Chiranth MG</code>)</b><br><img src="docs/screenshots/footer_credit_desktop.png" alt="Footer Credit" /></td>
+</tr>
+</table>
 
 ---
 
-## Neo-Brutalist Design System (Pixel-Grid x Kinetic Type)
+## 🎯 Overview
 
-- **Color Tokens:**
-  - Acid Lime: `#CCFF00`
-  - Signal Yellow: `#F5FF00`
-  - Hot Magenta: `#F040B8`
-  - Violet: `#A97BFF`
-  - Ink: `#0A0A0A`
-  - Paper: `#F4F4EE`
-- **Typography:**
-  - Display: `Archivo` 900 heavy grotesk with Roman/Italic mixing (fluid `clamp()` sizes up to ~18vw).
-  - Pixel Accent: `Silkscreen` for badges, tags, and micro numbers.
-  - Mono: `JetBrains Mono` for live kinematic metrics and timestamps.
-- **Components (`/frontend/src/ui`):**
-  - `SelectionBox`: Figma-style dashed border with 4 solid square corner handles and eyebrow label chips.
-  - `PixelTile`: 12-col bento grid tile with 1px hairline border, subtle spring 3D tilt, and pixel-stair corners.
-  - `TagChip`: 1px outline pixel tag chips with drag support.
-  - `DotMatrix`: SVG dot pattern clusters with cursor-reactive illumination.
-  - `MarqueeTicker`: Infinite pixel-font criteria marquee ticker reacting to scroll velocity.
-  - `KineticHeading`: Giant kinetic typography with per-character stagger and roman/italic word swapping.
-  - `CursorLabel`: Neon pointer arrow with reactive hover label pill ("UPLOAD", "PLAY", "JUMP TO FRAME") and corner coordinates readout.
-  - `IllustrativeSquatDemo`: Stick-figure squat loop with real-time calculated angles, patellar horizon, and joint angle tooltips.
-- **Easter Egg:**
-  - Konami code listener (`↑↑↓↓←→←→BA`) toggles inverted palette and visual pixel rain.
+Forge assesses lifters against the definitive standard of strength training: **pages 1–35 of the *Starting Strength* squat chapter**.
 
-Explore the complete component library at the live `/design` route!
+Unlike black-box fitness apps that invent ungrounded scores, Forge runs on strict engineering honesty:
+
+| | Principle | What it means |
+|---|---|---|
+| ⚙️ | **Deterministic Assessment** | Measurements are judged against rules in [`skill/squat_skill.yaml`](skill/squat_skill.yaml) |
+| 🔍 | **Honest Uncertainty** | Every metric is tagged **Observed** (direct 2D vector) or **Estimated** (proxy for 3D anatomy). Things invisible from the side (stance width, toe angle, knee valgus) return `cannot assess` |
+| 📖 | **Auditable Citations** | Every finding cites the exact page, figure and section |
+| 🤖 | **Scoped AI Coaching** | LLMs (Gemini / Anthropic / local template) write coaching prose only. They can never change verdicts or invent thresholds |
 
 ---
 
-## System Architecture
+## 🎨 Neo-Brutalist Design System
+
+*Pixel-Grid × Kinetic Type*
+
+### Color Tokens
+
+| Swatch | Name | Hex |
+|:---:|---|---|
+| ![](https://img.shields.io/badge/-%20%20%20-CCFF00) | Acid Lime | `#CCFF00` |
+| ![](https://img.shields.io/badge/-%20%20%20-F5FF00) | Signal Yellow | `#F5FF00` |
+| ![](https://img.shields.io/badge/-%20%20%20-F040B8) | Hot Magenta | `#F040B8` |
+| ![](https://img.shields.io/badge/-%20%20%20-A97BFF) | Violet | `#A97BFF` |
+| ![](https://img.shields.io/badge/-%20%20%20-0A0A0A) | Ink | `#0A0A0A` |
+| ![](https://img.shields.io/badge/-%20%20%20-F4F4EE) | Paper | `#F4F4EE` |
+
+### Typography
+
+- **Display:** `Archivo` 900, heavy grotesk with Roman/Italic mixing (fluid `clamp()` up to ~18vw)
+- **Pixel Accent:** `Silkscreen` for badges, tags and micro numbers
+- **Mono:** `JetBrains Mono` for live metrics and timestamps
+
+### Components (`/frontend/src/ui`)
+
+| Component | Description |
+|---|---|
+| `SelectionBox` | Figma-style dashed border, 4 solid square corner handles, eyebrow label chips |
+| `PixelTile` | 12-col bento tile, 1px hairline border, spring 3D tilt, pixel-stair corners |
+| `TagChip` | 1px outline pixel tag chips with drag support |
+| `DotMatrix` | SVG dot clusters with cursor-reactive illumination |
+| `MarqueeTicker` | Infinite pixel-font criteria ticker reacting to scroll velocity |
+| `KineticHeading` | Giant type with per-character stagger and roman/italic swaps |
+| `CursorLabel` | Neon pointer with hover pills (`UPLOAD`, `PLAY`, `JUMP TO FRAME`) and coordinate readout |
+| `IllustrativeSquatDemo` | Stick-figure squat loop with live angles, patellar horizon and joint tooltips |
+
+> 🥚 **Easter Egg:** enter the Konami code `↑ ↑ ↓ ↓ ← → ← → B A` for an inverted palette and pixel rain.
+
+Explore everything live at the [`/design`](https://forge-squat-analyzer.onrender.com/design) route.
+
+---
+
+## 🧠 Architecture
 
 ```mermaid
 flowchart TD
     A["User Video Upload / Camera Recording\n(MP4 / MOV / WEBM, max 60s, max 100MB)"] --> B["FastAPI Backend\n(Port 7860)"]
-    
+
     subgraph Pipeline ["Kinematic Analysis Pipeline"]
         B --> C["1. Ingest & Normalize\n(OpenCV rotation, resolution & FPS normalization)"]
         C --> D["2. Quality Gate\n(Side-view lateral spread, body framing, steadiness)"]
@@ -96,43 +109,48 @@ flowchart TD
         I --> J["8. Coaching Agent\n(Gemini 1.5 Flash / Anthropic / Template Fallback)"]
         J --> K["9. Video Rendering\n(OpenCV skeleton & bar path trail overlay MP4)"]
     end
-    
+
     K --> L["Client Bento Dashboard\n(React + Vite + Recharts + Canvas Overlay)"]
     L --> M["Local IndexedDB History\n(Device persistence with 6h server TTL notice)"]
 ```
 
 ---
 
-## Quickstart (One-Click)
+## ⚡ Quickstart
 
-### Automated Windows Launcher:
-Double-click `start.bat` in the root folder! It launches both the FastAPI backend and the Vite frontend in dedicated terminal windows and automatically opens `http://localhost:5173`.
+### 🪟 One-Click (Windows)
 
-### Manual Startup:
+Double-click **`start.bat`** in the root folder. It launches the FastAPI backend and Vite frontend in separate terminals and opens `http://localhost:5173`.
+
+### 🛠️ Manual
+
 ```bash
-# Terminal 1 - Backend:
+# Terminal 1 — Backend
 set PYTHONPATH=backend
 python -m uvicorn app.main:app --host 0.0.0.0 --port 7860
 
-# Terminal 2 - Frontend:
+# Terminal 2 — Frontend
 cd frontend
 npx vite --host --port 5173
 ```
 
 ---
 
-## Verification & Test Suite
+## ✅ Verification & Tests
 
-Run the full end-to-end automated verification script:
+**End-to-end evidence script**
+
 ```bash
 python backend/tests/verify_and_generate_evidence.py
 ```
-- Tests real side-view barbell squat video (`common_sample_squat.mp4` / `squat_clip_15s.mp4`)
-- Validates 5 detected reps with exact start, bottom, and lockout frames
-- Tests quality-gate rejection on front-view video (`hard_front_view.mp4`)
-- Tests hot-reloading of `skill/squat_skill.yaml` without application restart.
 
-All 27 pipeline unit tests:
+- ✔️ Real side-view barbell squat (`common_sample_squat.mp4` / `squat_clip_15s.mp4`)
+- ✔️ 5 detected reps with exact start, bottom and lockout frames
+- ✔️ Quality-gate rejection on front-view video (`hard_front_view.mp4`)
+- ✔️ Hot-reload of `skill/squat_skill.yaml` with no restart
+
+**Unit tests (27)**
+
 ```bash
 $env:PYTHONPATH="backend"
 pytest backend/tests/test_pipeline.py -v
@@ -140,8 +158,19 @@ pytest backend/tests/test_pipeline.py -v
 
 ---
 
-## Documentation
-- [`docs/BUILD_NOTE.md`](docs/BUILD_NOTE.md): Architecture decisions, design token migration, trade-offs, and verification logs.
-- [`docs/EVIDENCE.md`](docs/EVIDENCE.md): Visual proof, frame extracts, and criteria alignment.
-- [`docs/AI_USAGE.md`](docs/AI_USAGE.md): Scoped AI coaching architecture and prompt engineering.
-- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md): Step-by-step walkthrough for evaluating the live system.
+## 📚 Documentation
+
+| Doc | Contents |
+|---|---|
+| [`BUILD_NOTE.md`](docs/BUILD_NOTE.md) | Architecture decisions, design token migration, trade-offs, verification logs |
+| [`EVIDENCE.md`](docs/EVIDENCE.md) | Visual proof, frame extracts, criteria alignment |
+| [`AI_USAGE.md`](docs/AI_USAGE.md) | Scoped AI coaching architecture and prompt engineering |
+| [`DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | Step-by-step walkthrough for evaluating the live system |
+
+---
+
+<div align="center">
+
+**Built with 💪 by [Chiranth MG](https://github.com/cmg633)**
+
+</div>
